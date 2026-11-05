@@ -30,7 +30,7 @@ Each release attaches an npm tarball with binaries for macOS and Linux, on arm64
 ```json
 {
   "devDependencies": {
-    "lq": "https://github.com/OWNER/lq/releases/download/v0.1.0/lq-theme-check-0.1.0.tgz"
+    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.1.0/lq-theme-check-0.1.0.tgz"
   }
 }
 ```
