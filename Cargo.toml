@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+lq-syntax = { path = "crates/lq-syntax" }
+memchr = "2"
+mimalloc = { version = "0.1", default-features = false }
+rayon = "1"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = true
+
+# Fast optimized builds for iterating against the parity harnesses.
+[profile.fast]
+inherits = "release"
+lto = "off"
+codegen-units = 64
+incremental = true
+strip = false

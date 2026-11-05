@@ -1,0 +1,451 @@
+diff --git a/packages/theme-check-common/src/test/golden-recorder.ts b/packages/theme-check-common/src/test/golden-recorder.ts
+new file mode 100644
+index 00000000..8b8b578b
+--- /dev/null
++++ b/packages/theme-check-common/src/test/golden-recorder.ts
+@@ -0,0 +1,421 @@
++/**
++ * Golden recorder for lq (scripts/parity/record-goldens.sh). A no-op unless
++ * LQ_GOLDEN_DIR is set. It appends one JSON line per check() call. It never
++ * changes what check() returns or throws.
++ */
++import * as nodeFs from 'node:fs';
++import { expect, vi } from 'vitest';
++import {
++  allChecks,
++  applyFixToString,
++  autofix as coreAutofix,
++  CheckDefinition,
++  ChecksSettings,
++  createCorrector,
++  Dependencies,
++  Mode,
++  Offense,
++  Theme,
++} from '../index';
++import * as path from '../path';
++import * as fileUtils from '../utils/file-utils';
++import { MockFileSystem } from './MockFileSystem';
++import { MockTheme } from './MockTheme';
++
++const rootUri = path.normalize('file:/');
++const DOCSET_METHODS = ['filters', 'objects', 'liquidDrops', 'tags', 'systemTranslations'];
++/** Fields no check reads (grep of src/ for .examples/.syntax/.json_data). */
++const DOCSET_STRIP = new Set(['examples', 'syntax', 'syntax_guide', 'json_data']);
++const FUNCTION_DEPS = [
++  'getBlockSchema',
++  'getSectionSchema',
++  'getAppBlockSchema',
++  'getDocDefinition',
++  'getCSSClassesForURI',
++  'getReferences',
++  'getDependencies',
++  'getMetafieldDefinitions',
++];
++
++interface RecorderArgs {
++  themeDesc: MockTheme;
++  checks: CheckDefinition[];
++  mockDependencies: Partial<Dependencies>;
++  checkSettings: ChecksSettings;
++  mode: Mode;
++  getTheme: (themeDesc: MockTheme) => Theme;
++}
++
++/** Runs `run` with (wrapped) mock dependencies, recording the call when enabled. */
++export async function recordGoldenCheck(
++  args: RecorderArgs,
++  run: (deps: Partial<Dependencies>) => Promise<Offense[]>,
++): Promise<Offense[]> {
++  const dir = process.env.LQ_GOLDEN_DIR;
++  if (!dir) return run(args.mockDependencies);
++
++  const state = expect.getState();
++  const record: any = {
++    spec: specPath(state.testPath),
++    test: state.currentTestName ?? null,
++    theme: JSON.parse(JSON.stringify(args.themeDesc)),
++    checks: args.checks.map((check) => check.meta.code),
++    settings: JSON.parse(JSON.stringify(args.checkSettings)),
++    mode: args.mode,
++    deps: {},
++  };
++  const reasons = new Set<string>();
++  if (args.checks.some((check) => !allChecks.includes(check as any))) {
++    reasons.add('custom check definition');
++  }
++
++  const remoteMock = (fileUtils as any).hasRemoteAssetSizeExceededThreshold;
++  const remoteCalls = vi.isMockFunction(remoteMock) ? remoteMock.mock.calls.length : 0;
++
++  const captured = new Map<string, Map<string, string>>();
++  const pending: Promise<unknown>[] = [];
++  const wrapped = wrapDeps(args.mockDependencies, captured, pending, reasons);
++
++  const finish = async (fill: () => Promise<void>) => {
++    try {
++      await Promise.all(pending);
++      await fill();
++      await serializeDeps(args, record, captured, reasons);
++      if (vi.isMockFunction(remoteMock) && remoteMock.mock.calls.length > remoteCalls) {
++        reasons.add('module mock: hasRemoteAssetSizeExceededThreshold');
++      }
++    } catch (err) {
++      reasons.add(`recorder failure: ${messageOf(err)}`);
++    }
++    if (reasons.size > 0) record.unreplayable = [...reasons].join('; ');
++    nodeFs.mkdirSync(dir, { recursive: true });
++    nodeFs.appendFileSync(`${dir}/records-${process.pid}.jsonl`, JSON.stringify(record) + '\n');
++  };
++
++  let offenses: Offense[];
++  try {
++    offenses = await run(wrapped);
++  } catch (err: any) {
++    await finish(async () => {
++      record.error = { name: err?.name ?? null, message: messageOf(err) };
++    });
++    throw err;
++  }
++  await finish(async () => {
++    record.offenses = offenses.map((offense) => serializeOffense(args.themeDesc, offense));
++    record.fixed = await serializeFixed(args, offenses);
++  });
++  return offenses;
++}
++
++function specPath(testPath: string | undefined) {
++  if (!testPath) return null;
++  const at = testPath.lastIndexOf('packages/');
++  return at >= 0 ? testPath.slice(at) : testPath;
++}
++
++function messageOf(err: any): string {
++  return err?.message ?? String(err);
++}
++
++function position(pos: Offense['start']) {
++  return { index: pos.index, line: pos.line, character: pos.character };
++}
++
++function applyOne(source: string | undefined, type: Offense['type'], fixer: (c: any) => void) {
++  try {
++    const corrector = createCorrector(type, source as string);
++    fixer(corrector);
++    return applyFixToString(source as string, corrector.fix);
++  } catch (err) {
++    return { error: messageOf(err) };
++  }
++}
++
++/** The theme key for a uri; odd keys like 'file://sections/a.liquid' do not round-trip. */
++function themeKey(themeDesc: MockTheme, uri: string) {
++  return Object.keys(themeDesc).find((key) => path.join(rootUri, key) === uri);
++}
++
++function serializeOffense(themeDesc: MockTheme, offense: Offense) {
++  const source = themeDesc[themeKey(themeDesc, offense.uri) as string];
++  return {
++    check: offense.check,
++    type: offense.type,
++    uri: offense.uri,
++    message: offense.message,
++    severity: offense.severity,
++    start: position(offense.start),
++    end: position(offense.end),
++    fix: offense.fix ? applyOne(source, offense.type, offense.fix as any) : null,
++    suggest: offense.suggest
++      ? offense.suggest.map((suggestion) => ({
++          message: suggestion.message,
++          output: applyOne(source, offense.type, suggestion.fix as any),
++        }))
++      : null,
++  };
++}
++
++async function serializeFixed(args: RecorderArgs, offenses: Offense[]) {
++  const fixed: Record<string, string> = {};
++  try {
++    await coreAutofix(args.getTheme(args.themeDesc), offenses, async (sourceCode, fixes) => {
++      const output = applyFixToString(sourceCode.source, fixes);
++      if (output !== sourceCode.source) {
++        fixed[themeKey(args.themeDesc, sourceCode.uri) as string] = output;
++      }
++    });
++    return fixed;
++  } catch (err) {
++    return { error: messageOf(err) };
++  }
++}
++
++/** Calls fn without leaving a trace on a vi.fn's call log, so spec assertions still hold. */
++async function callQuietly(fn: any, thisArg: any, callArgs: unknown[]) {
++  const logs = vi.isMockFunction(fn)
++    ? [
++        fn.mock.calls,
++        fn.mock.results,
++        fn.mock.settledResults,
++        fn.mock.contexts,
++        fn.mock.instances,
++        fn.mock.invocationCallOrder,
++      ]
++    : [];
++  const lengths = logs.map((log: unknown[]) => log.length);
++  try {
++    return await fn.apply(thisArg, callArgs);
++  } finally {
++    logs.forEach((log: unknown[], i: number) => (log.length = lengths[i]));
++  }
++}
++
++class Unserializable extends Error {}
++
++/** JSON-safe form of a mock's value: Error/Set/Map tags, schema objects minus `ast`. */
++function ser(value: any, stack: object[] = []): any {
++  if (value === undefined || value === null) return null;
++  const type = typeof value;
++  if (type === 'string' || type === 'boolean' || type === 'number') return value;
++  if (type !== 'object') throw new Unserializable(`${type} value`);
++  if (value instanceof Error) return { $error: value.message };
++  if (stack.includes(value)) throw new Unserializable('circular value');
++  const next = [...stack, value];
++  if (value instanceof Set) return { $set: [...value].map((v) => ser(v, next)) };
++  if (value instanceof Map) {
++    return { $map: [...value].map(([k, v]) => [ser(k, next), ser(v, next)]) };
++  }
++  if (Array.isArray(value)) return value.map((v) => ser(v, next));
++  const proto = Object.getPrototypeOf(value);
++  if (proto !== Object.prototype && proto !== null) {
++    throw new Unserializable(`instance of ${proto.constructor?.name}`);
++  }
++  const isSchema = 'validSchema' in value || ('staticBlockDefs' in value && 'name' in value);
++  if (isSchema && 'ast' in value && typeof value.value !== 'string') {
++    throw new Unserializable('schema with an ast but no source value');
++  }
++  const keys = isSchema
++    ? ['name', 'type', 'offset', 'value', 'validSchema', 'parsed', 'staticBlockDefs']
++    : Object.keys(value);
++  const out: any = {};
++  for (const key of keys) {
++    if (value[key] !== undefined) out[key] = ser(value[key], next);
++  }
++  return out;
++}
++
++function argKey(callArgs: unknown[]) {
++  if (callArgs.length === 1 && typeof callArgs[0] === 'string') return callArgs[0];
++  return JSON.stringify(callArgs);
++}
++
++function serResult(key: string, result: any, reasons: Set<string>) {
++  try {
++    return JSON.stringify(ser(result));
++  } catch (err) {
++    reasons.add(`${key}: not serializable (${messageOf(err)})`);
++    return 'null';
++  }
++}
++
++function capture(
++  captured: Map<string, Map<string, string>>,
++  reasons: Set<string>,
++  key: string,
++  arg: string,
++  json: string,
++) {
++  const results = captured.get(key)!;
++  const previous = results.get(arg);
++  if (previous !== undefined && previous !== json) {
++    reasons.add(`${key}: result depends on call order`);
++  }
++  if (previous === undefined) results.set(arg, json);
++}
++
++/** Wraps function deps so each real call's argument and result are captured. */
++function wrapDeps(
++  mockDependencies: Partial<Dependencies>,
++  captured: Map<string, Map<string, string>>,
++  pending: Promise<unknown>[],
++  reasons: Set<string>,
++): Partial<Dependencies> {
++  const wrapped: any = { ...mockDependencies };
++  for (const key of FUNCTION_DEPS) {
++    const original = (mockDependencies as any)[key];
++    if (typeof original !== 'function') continue;
++    captured.set(key, new Map());
++    wrapped[key] = function (this: unknown, ...callArgs: unknown[]) {
++      const arg = argKey(callArgs);
++      const result = original.apply(this, callArgs);
++      pending.push(
++        Promise.resolve(result).then(
++          (value) => capture(captured, reasons, key, arg, serResult(key, value, reasons)),
++          (err) =>
++            capture(captured, reasons, key, arg, JSON.stringify({ $throw: messageOf(err) })),
++        ),
++      );
++      return result;
++    };
++  }
++  return wrapped;
++}
++
++function matches(sources: string, regex: RegExp) {
++  return [...sources.matchAll(regex)].map((m) => m[1]).filter((s) => /^[\w@./-]+$/.test(s));
++}
++
++/** The names a function dep is probed with, beyond what upstream actually asked for. */
++function probeArgs(themeDesc: MockTheme): Record<string, string[]> {
++  const files = Object.keys(themeDesc);
++  const sources = Object.values(themeDesc).join('\n');
++  const types = matches(sources, /["']?\btype["']?\s*:\s*["']([^"']+)["']/g);
++  const sectionTags = matches(sources, /\bsection\s+["']([^"']+)["']/g);
++  const renders = matches(sources, /\b(?:render|include)\s+["']([^"']+)["']/g);
++  const baseNames = (dir: string) =>
++    files
++      .filter((f) => f.startsWith(`${dir}/`) && f.endsWith('.liquid'))
++      .map((f) => path.basename(f, '.liquid'));
++  const uniq = (list: string[]) => [...new Set(list)];
++  const blockNames = uniq([...baseNames('blocks'), ...types]);
++  const uris = files.map((f) => path.join(rootUri, f));
++  return {
++    getBlockSchema: blockNames,
++    getAppBlockSchema: blockNames,
++    getSectionSchema: uniq([...baseNames('sections'), ...sectionTags, ...types]),
++    getDocDefinition: uniq([
++      ...files.filter((f) => f.endsWith('.liquid')),
++      ...renders.map((name) => `snippets/${name}.liquid`),
++      ...types.map((name) => `blocks/${name}.liquid`),
++    ]),
++    getCSSClassesForURI: uris,
++    getReferences: uris,
++    getDependencies: uris,
++    getMetafieldDefinitions: [rootUri],
++  };
++}
++
++async function serializeDeps(
++  args: RecorderArgs,
++  record: any,
++  captured: Map<string, Map<string, string>>,
++  reasons: Set<string>,
++) {
++  const mocks: any = args.mockDependencies;
++  const probes = probeArgs(args.themeDesc);
++  for (const key of Object.keys(mocks)) {
++    const value = mocks[key];
++    if (key === 'fs') serializeFs(args, record, reasons);
++    else if (key === 'themeDocset') record.deps[key] = await serializeDocset(value, reasons);
++    else if (key === 'jsonValidationSet') record.deps[key] = await serializeSchemas(value, reasons);
++    else if (!FUNCTION_DEPS.includes(key)) reasons.add(`unknown dependency: ${key}`);
++    else if (value === undefined || value === null) record.deps[key] = null;
++    else if (typeof value !== 'function') reasons.add(`${key}: not a function`);
++    else record.deps[key] = await serializeFunction(key, value, probes[key], captured, reasons);
++  }
++}
++
++async function serializeFunction(
++  key: string,
++  fn: any,
++  names: string[],
++  captured: Map<string, Map<string, string>>,
++  reasons: Set<string>,
++) {
++  const results = captured.get(key)!;
++  for (const name of names) {
++    let json: string;
++    try {
++      json = serResult(key, await callQuietly(fn, undefined, [name]), reasons);
++    } catch (err) {
++      json = JSON.stringify({ $throw: messageOf(err) });
++    }
++    capture(captured, reasons, key, name, json);
++  }
++  const out: Record<string, unknown> = {};
++  for (const [name, json] of results) out[name] = JSON.parse(json);
++  return out;
++}
++
++function sortedJSON(theme: MockTheme) {
++  return JSON.stringify(Object.entries(theme).sort(([a], [b]) => (a < b ? -1 : 1)));
++}
++
++function serializeFs(args: RecorderArgs, record: any, reasons: Set<string>) {
++  const fs: any = args.mockDependencies.fs;
++  if (!(fs instanceof MockFileSystem)) {
++    record.deps.fs = { $custom: fs?.constructor?.name ?? null };
++    reasons.add('custom file system');
++    return;
++  }
++  const internals: any = fs;
++  const isDefaultTheme =
++    sortedJSON(internals.mockTheme) ===
++    sortedJSON({ '.theme-check.yml': '', ...args.themeDesc });
++  const isDefaultRoot = internals.rootUri === path.normalize('file:///');
++  const isPlain = fs.constructor === MockFileSystem;
++  if (isDefaultTheme && isDefaultRoot && isPlain) return;
++  record.deps.fs = {
++    theme: JSON.parse(JSON.stringify(internals.mockTheme)),
++    rootUri: internals.rootUri,
++    ...(isPlain ? {} : { class: fs.constructor.name }),
++  };
++}
++
++function stripEntry(entry: any) {
++  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
++  return Object.fromEntries(Object.entries(entry).filter(([k]) => !DOCSET_STRIP.has(k)));
++}
++
++async function serializeDocset(docset: any, reasons: Set<string>) {
++  if (docset === undefined || docset === null) return null;
++  const out: any = {};
++  if (docset.isAugmented) out.isAugmented = true;
++  for (const method of DOCSET_METHODS) {
++    if (typeof docset[method] !== 'function') continue;
++    try {
++      const result = await callQuietly(docset[method], docset, []);
++      out[method] = ser(Array.isArray(result) ? result.map(stripEntry) : result);
++    } catch (err) {
++      if (err instanceof Unserializable) reasons.add(`themeDocset.${method}: ${err.message}`);
++      out[method] = { $error: messageOf(err) };
++    }
++  }
++  return out;
++}
++
++async function serializeSchemas(set: any, reasons: Set<string>) {
++  if (set === undefined || set === null) return null;
++  const out: any = { schemas: {} };
++  for (const mode of ['theme', 'app']) {
++    try {
++      out.schemas[mode] = ser(await callQuietly(set.schemas, set, [mode]));
++    } catch (err) {
++      if (err instanceof Unserializable) reasons.add(`jsonValidationSet: ${err.message}`);
++      out.schemas[mode] = { $error: messageOf(err) };
++    }
++  }
++  return out;
++}
+diff --git a/packages/theme-check-common/src/test/test-helper.ts b/packages/theme-check-common/src/test/test-helper.ts
+index bc98071e..cb317fc2 100644
+--- a/packages/theme-check-common/src/test/test-helper.ts
++++ b/packages/theme-check-common/src/test/test-helper.ts
+@@ -29,6 +29,7 @@ import {
+   toSourceCode,
+ } from '../index';
+ import * as path from '../path';
++import { recordGoldenCheck } from './golden-recorder';
+ import { MockFileSystem } from './MockFileSystem';
+ import { MockTheme } from './MockTheme';
+ 
+@@ -238,7 +239,10 @@ export async function check(
+     },
+   };
+ 
+-  return coreCheck(theme, config, { ...defaultMockDependencies, ...mockDependencies });
++  return recordGoldenCheck(
++    { themeDesc, checks, mockDependencies, checkSettings, mode, getTheme },
++    (deps) => coreCheck(theme, config, { ...defaultMockDependencies, ...deps }),
++  );
+ }
+ 
+ export async function runLiquidCheck(

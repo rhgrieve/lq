@@ -1,0 +1,18 @@
+[package]
+name = "lq-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lq"
+path = "src/main.rs"
+
+[dependencies]
+lq-syntax.workspace = true
+mimalloc.workspace = true
+rayon.workspace = true
+lq-check = { path = "../lq-check" }
+lq-fmt = { path = "../lq-fmt" }
+lq-json = { path = "../lq-json" }
+lq-theme = { path = "../lq-theme" }
