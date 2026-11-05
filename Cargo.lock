@@ -762,6 +762,7 @@ dependencies = [
 name = "lq-cli"
 version = "0.1.1"
 dependencies = [
+ "libc",
  "lq-check",
  "lq-fmt",
  "lq-json",

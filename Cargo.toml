@@ -9,6 +9,7 @@ license = "MIT"
 
 [workspace.dependencies]
 lq-syntax = { path = "crates/lq-syntax" }
+libc = "0.2"
 memchr = "2"
 mimalloc = { version = "0.1", default-features = false }
 rayon = "1"

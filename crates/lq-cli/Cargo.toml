@@ -9,6 +9,7 @@ name = "lq"
 path = "src/main.rs"
 
 [dependencies]
+libc.workspace = true
 lq-syntax.workspace = true
 mimalloc.workspace = true
 rayon.workspace = true
