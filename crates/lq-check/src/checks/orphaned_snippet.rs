@@ -17,7 +17,7 @@ impl<'a> LiquidCheck<'a> for Check {
             return;
         }
         if cx.references(cx.uri()).is_empty() {
-            cx.report(LiquidProblem::new("This snippet is not referenced by any other files", 0, 1));
+            cx.report(LiquidProblem::new("This snippet is not referenced by any other files", 0, 1).file_level());
         }
     }
 }

@@ -29,7 +29,7 @@ impl<'a> LiquidCheck<'a> for AppBlockMissingSchema {
 
     fn on_code_path_end(&mut self, cx: &LiquidCx<'a, '_>) {
         if !self.found_schema {
-            cx.report(LiquidProblem::new("The schema does not exist", 0, 0));
+            cx.report(LiquidProblem::new("The schema does not exist", 0, 0).file_level());
         }
     }
 }

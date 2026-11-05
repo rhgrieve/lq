@@ -7,6 +7,8 @@ use crate::api::*;
 use lq_json::validator::JsError;
 use lq_syntax::{LiteralValue, Markup, Node};
 
+const BALANCE_NOTE: &str = "a condition's branches have to open and close the same tags, or the HTML is broken when only one of them runs";
+
 pub const IMPL: CheckImpl = CheckImpl::Liquid {
     create,
     enter: NodeMask::of(&[NodeKind::HtmlElement, NodeKind::HtmlDanglingMarkerClose]),
@@ -113,14 +115,14 @@ impl<'a> LiquidCheck<'a> for UnclosedHtmlElement<'a> {
                             format!("Opening tag does not have a matching closing tag for condition `{identifier}` in {in_} '{name}'"),
                             p.start,
                             p.end,
-                        ));
+                        ).hints_if(cx.wants_hints(), |p| p.label("never closed in this branch").note(BALANCE_NOTE)));
                     } else {
                         let p = node.position();
                         cx.report(LiquidProblem::new(
                             format!("Closing tag does not have a matching opening tag for condition `{identifier}` in {in_} '{name}'"),
                             p.start,
                             p.end,
-                        ));
+                        ).hints_if(cx.wants_hints(), |p| p.label("never opened in this branch").note(BALANCE_NOTE)));
                     }
                 }
             }

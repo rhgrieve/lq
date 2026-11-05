@@ -35,6 +35,6 @@ impl<'a> LiquidCheck<'a> for Check {
                 })
             })
             .collect();
-        report_unknown_arguments(cx, node, &unknown, name);
+        report_unknown_arguments(cx, node, &unknown, name, &params);
     }
 }

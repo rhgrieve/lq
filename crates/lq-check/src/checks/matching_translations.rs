@@ -1,6 +1,7 @@
 //! `MatchingTranslations`: a cross-file JSON check with a fix and a suggestion.
 
 use crate::api::*;
+use crate::check_utils::{closest, did_you_mean};
 use lq_json::validator::JsError;
 use lq_json::{JsonNode, Literal, Loc, Value};
 use std::collections::{HashMap, HashSet};
@@ -172,6 +173,9 @@ impl<'a> JsonCheck<'a> for MatchingTranslations<'a> {
         }
         cx.report(
             JsonProblem::new(format!("A default translation for '{path}' does not exist"), loc.start, loc.end)
+                .hints_if(cx.wants_hints(), |p| {
+                    p.note_opt(closest(&path, self.default_translations.iter().map(String::as_str)).map(did_you_mean))
+                })
                 .suggest("Delete unneeded translation key", |c| c.remove(path.clone())),
         );
     }

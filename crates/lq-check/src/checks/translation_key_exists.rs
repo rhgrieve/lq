@@ -2,6 +2,7 @@
 
 use super::shared_rules::{parsed_schema_body, type_error};
 use crate::api::*;
+use crate::check_utils::{closest, did_you_mean};
 use lq_json::Value;
 use lq_syntax::{Node, RawMarkupKind};
 
@@ -53,6 +54,18 @@ fn key_exists(key: &str, mut pointer: Option<&Value>, null_not_found: bool) -> R
     Ok(true)
 }
 
+/// Every leaf's dotted key.
+pub(crate) fn flat_keys(value: &Value, prefix: &str, out: &mut Vec<String>) {
+    let Value::Object(object) = value else {
+        out.push(prefix.to_string());
+        return;
+    };
+    for (key, child) in object.iter() {
+        let path = if prefix.is_empty() { key.to_string() } else { format!("{prefix}.{key}") };
+        flat_keys(child, &path, out);
+    }
+}
+
 impl<'a> LiquidCheck<'a> for TranslationKeyExists<'a> {
     fn enter(&mut self, node: &'a Node<'a>, _ancestors: &[&'a Node<'a>], cx: &LiquidCx<'a, '_>) {
         match node {
@@ -87,6 +100,8 @@ impl<'a> LiquidCheck<'a> for TranslationKeyExists<'a> {
         }
         let schema_locales = self.schema.as_ref().and_then(|s| s.get("locales")).and_then(|l| l.get(locale));
 
+        // Only worked out once something is missing.
+        let mut known_keys: Option<Vec<String>> = None;
         for &(key, start, end) in &self.nodes {
             let null_not_found = cx.divergence(Divergence::NullInPath);
             let exists = key_exists(key, translations, null_not_found)
@@ -106,7 +121,16 @@ impl<'a> LiquidCheck<'a> for TranslationKeyExists<'a> {
                 message.push_str(&cx.to_relative_path(cx.uri()));
                 message.push('\'');
             }
-            cx.report(LiquidProblem::new(message, start, end));
+            cx.report(LiquidProblem::new(message, start, end).hints_if(cx.wants_hints(), |p| {
+                let keys = known_keys.get_or_insert_with(|| {
+                    let mut keys = Vec::new();
+                    if let Some(translations) = translations {
+                        flat_keys(translations, "", &mut keys);
+                    }
+                    keys
+                });
+                p.label("no such key").note_opt(closest(key, keys.iter().map(String::as_str)).map(did_you_mean))
+            }));
         }
     }
 }

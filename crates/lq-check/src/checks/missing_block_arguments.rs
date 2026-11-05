@@ -35,7 +35,7 @@ impl<'a> LiquidCheck<'a> for Check {
                 format!("Missing required argument '{}' in block tag for '{name}'.", parameter.name),
                 p.start,
                 p.end,
-            ));
+            ).hints_if(cx.wants_hints(), |p| p.note(format!("blocks/{name}.liquid declares it as required"))));
         }
     }
 }

@@ -31,12 +31,13 @@ impl<'a> LiquidCheck<'a> for Check {
                         start,
                         end,
                     )
+                    .hints_if(cx.wants_hints(), |p| p.label("unknown argument"))
                     .suggest(format!("Remove '{}'", alias.value), |c| c.remove(start - 1, end)),
                 );
             }
         }
         let unknown: Vec<_> =
             markup.args.iter().filter(|arg| named(arg).is_some_and(|a| !params.has(&a.name))).collect();
-        report_unknown_arguments(cx, node, &unknown, name);
+        report_unknown_arguments(cx, node, &unknown, name, &params);
     }
 }

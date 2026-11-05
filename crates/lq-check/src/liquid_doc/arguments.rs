@@ -48,14 +48,51 @@ impl<'a> DocParams<'a> {
     }
 }
 
+/// The file holding the `@param`s of `node`'s target.
+fn declaring_file(node: &Node<'_>, name: &str) -> String {
+    match node {
+        Node::ContentForMarkup(_) => format!("blocks/{name}.liquid"),
+        _ => format!("snippets/{name}.liquid"),
+    }
+}
+
+/// How many `@param`s a hint lists by name.
+const LISTED_PARAMS: usize = 6;
+
+fn declared_note(node: &Node<'_>, name: &str, params: &DocParams<'_>) -> String {
+    let file = declaring_file(node, name);
+    let names: Vec<&str> = params.values().map(|p| p.name.as_str()).collect();
+    if names.is_empty() {
+        return format!("{file} declares no arguments");
+    }
+    let listed = names[..names.len().min(LISTED_PARAMS)].join(", ");
+    match names.len().saturating_sub(LISTED_PARAMS) {
+        0 => format!("{file} declares {listed}"),
+        more => format!("{file} declares {listed}, +{more} more"),
+    }
+}
+
+fn required_note(node: &Node<'_>, name: &str, param: &LiquidDocParameter) -> String {
+    let file = declaring_file(node, name);
+    let ty = param.ty.as_deref().map_or(String::new(), |t| format!(" {{{t}}}"));
+    let description = param.description.as_deref().map_or(String::new(), |d| format!(": {d}"));
+    format!("{file} declares @param{ty} {}{description}", param.name)
+}
+
 /// `reportUnknownArguments`.
-pub fn report_unknown_arguments<'a>(cx: &LiquidCx<'a, '_>, node: &'a Node<'a>, args: &[&'a Node<'a>], name: &str) {
+pub fn report_unknown_arguments<'a>(cx: &LiquidCx<'a, '_>, node: &'a Node<'a>, args: &[&'a Node<'a>], name: &str, params: &DocParams<'_>) {
     let owner = owner_message(node, name);
     for &arg in args {
         let a = arg_name(arg);
         let p = arg.position();
         cx.report(
             LiquidProblem::new(format!("Unknown argument '{a}'{owner}."), p.start, p.end)
+                .hints_if(cx.wants_hints(), |problem| {
+                    problem
+                        .label("unknown argument")
+                        .note_opt(crate::check_utils::closest(a, params.values().map(|p| p.name.as_str())).map(crate::check_utils::did_you_mean))
+                        .note(declared_note(node, name, params))
+                })
                 .suggest(format!("Remove '{a}'"), |c| remove_argument(c, cx.source(), node, arg)),
         );
     }
@@ -69,6 +106,7 @@ pub fn report_missing_arguments<'a>(cx: &LiquidCx<'a, '_>, node: &'a Node<'a>, m
         let n = &param.name;
         cx.report(
             LiquidProblem::new(format!("Missing required argument '{n}'{owner}."), p.start, p.end)
+                .hints_if(cx.wants_hints(), |problem| problem.note(required_note(node, name, param)))
                 .suggest(format!("Add required argument '{n}'"), |c| {
                     add_argument(c, cx.source(), node, param, cx.divergence(Divergence::AddArgumentSuggestion))
                 }),

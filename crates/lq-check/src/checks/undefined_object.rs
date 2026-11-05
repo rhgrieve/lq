@@ -1,6 +1,7 @@
 //! `UndefinedObject`.
 
 use crate::api::*;
+use crate::check_utils::{closest, did_you_mean};
 use crate::block_parameters::BLOCK_CONTENT_PARAMETER;
 use crate::check_utils::is_within_unparsed_raw_tag;
 use crate::liquid_doc::has_liquid_doc;
@@ -195,7 +196,12 @@ impl<'a> LiquidCheck<'a> for UndefinedObject<'a> {
                 || block_parameters.as_ref().is_some_and(|p| p.get(name).is_some())
                 || self.is_scoped(name, position);
             if !defined {
-                cx.report(LiquidProblem::new(format!("Unknown object '{name}' used."), position.start, position.end));
+                cx.report(
+                    LiquidProblem::new(format!("Unknown object '{name}' used."), position.start, position.end).hints_if(cx.wants_hints(), |p| {
+                        let known = self.file_scoped.iter().copied().chain(self.scoped.keys().copied()).chain(globals.iter().copied());
+                        p.label("not defined").note_opt(closest(name, known).map(did_you_mean))
+                    }),
+                );
             }
         }
     }
