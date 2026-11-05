@@ -149,7 +149,7 @@ fn items(report: &Report<'_>, term: &Term, group: &Group<'_>, gutter: usize) -> 
             items.push(Item { key: "try", lines });
         }
         if suggestions.len() > MAX_SUGGESTIONS {
-            let more = format!("+{} more", suggestions.len() - MAX_SUGGESTIONS);
+            let more = format!("+{} more, in --output json-rich", suggestions.len() - MAX_SUGGESTIONS);
             items.push(Item { key: "try", lines: vec![term.paint(style::DIM, &more)] });
         }
     }

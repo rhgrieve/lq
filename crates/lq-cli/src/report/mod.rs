@@ -4,6 +4,7 @@
 pub mod diff;
 pub mod fold;
 pub mod highlight;
+pub mod machine;
 pub mod rail;
 pub mod snippet;
 pub mod summary;

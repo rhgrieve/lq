@@ -12,7 +12,7 @@ use lq_theme::divergence::{parse_divergence_flag, Divergences};
 use rayon::prelude::*;
 use crate::report::term::{style, ColorChoice, Term};
 use crate::report::upstream::{card, grouped, render_json, render_text};
-use crate::report::{fail_threshold, rail, Report};
+use crate::report::{fail_threshold, machine, rail, Report};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -29,7 +29,10 @@ const WORKER_STACK: usize = 1 << 30;
 enum Format {
     Text,
     Upstream,
+    Short,
+    Github,
     Json,
+    JsonRich,
 }
 
 impl Format {
@@ -39,6 +42,9 @@ impl Format {
         }
         match flags.output.as_deref() {
             Some("json") => Format::Json,
+            Some("json-rich") => Format::JsonRich,
+            Some("short") => Format::Short,
+            Some("github") => Format::Github,
             Some("upstream") => Format::Upstream,
             Some(_) => Format::Text,
             None if flags.upstream_bugs => Format::Upstream,
@@ -88,9 +94,12 @@ Options:
   -p, --path <dir>         Theme root [default: current directory]
   -C, --config <file>      Config file, or theme-check:all, :recommended, :theme-app-extension,
                            :nothing [default: .theme-check.yml in the root]
-  -o, --output <format>    text, json or upstream [default: text]
+  -o, --output <format>    text, short, github, json, json-rich or upstream [default: text]
                              text       a report for people, on stderr
+                             short      path:line:col: severity Check: message, one per line
+                             github     annotations for GitHub Actions
                              json       upstream's JSON, unchanged
+                             json-rich  everything in the text report, as data
                              upstream   upstream's text layout, on stderr
   -j, --json               Same as --output json
       --color <when>       auto, always or never [default: auto]. Honors NO_COLOR and FORCE_COLOR
@@ -107,11 +116,11 @@ Options:
   -h, --help               Print this help
 
 Exit code: 0 clean, 1 offenses at or above the fail level or a bad config, 2 bad usage.
-text and upstream go to stderr, and JSON to stdout.
+text and upstream go to stderr. The formats for tools go to stdout.
 Run `lq explain <Check>` for what a check does and how to configure or disable it.
 ";
 
-const OUTPUTS: [&str; 3] = ["text", "json", "upstream"];
+const OUTPUTS: [&str; 6] = ["text", "short", "github", "json", "json-rich", "upstream"];
 
 const LEVELS: [&str; 6] = ["crash", "error", "suggestion", "style", "warning", "info"];
 
@@ -342,7 +351,11 @@ pub fn check(args: &[String]) -> i32 {
             .into_iter()
             .find(|(on, _)| *on);
         if let Some((_, name)) = conflict {
-            eprintln!("JSON output can't be used with --{name}.");
+            if format == Format::Json {
+                eprintln!("JSON output can't be used with --{name}.");
+            } else {
+                eprintln!("--output {} can't be used with --{name}.", flags.output.as_deref().unwrap_or("json"));
+            }
             return 2;
         }
     }
@@ -372,7 +385,7 @@ pub fn check(args: &[String]) -> i32 {
     match result {
         Ok(code) => code,
         Err(e) => {
-            if format == Format::Json {
+            if matches!(format, Format::Json | Format::JsonRich) {
                 println!("{{\"error\":{{\"type\":\"abort\",\"message\":{}}}}}", quote(&e.message));
             } else if format != Format::Upstream {
                 let term = Term::detect(flags.color.unwrap_or(ColorChoice::Auto));
@@ -404,7 +417,7 @@ fn run_check(flags: &Flags, format: Format, root: &str, config_path: Option<&str
     }
     let mut config = load(config_path, root)?;
     config.divergences = flags.divergences;
-    config.hints = format == Format::Text;
+    config.hints = matches!(format, Format::Text | Format::JsonRich);
     if let Some(e) = config.ignore_type_error() {
         return Err(CliError { message: e.message, next_steps: None });
     }
@@ -468,10 +481,20 @@ fn run_check(flags: &Flags, format: Format, root: &str, config_path: Option<&str
             report.fail_level = flags.fail_level.as_deref().unwrap_or("error");
             report.fold = !flags.no_fold;
             report.applied = applied.as_ref().and_then(|a| a.as_ref().ok().copied());
-            report.check_fixes();
-            report.elapsed = t0.elapsed();
-            let term = Term::detect(flags.color.unwrap_or(ColorChoice::Auto));
-            eprint!("{}", rail::render(&report, &term));
+            if matches!(format, Format::Text | Format::JsonRich) {
+                report.check_fixes();
+            }
+            if format == Format::Text {
+                report.elapsed = t0.elapsed();
+                let term = Term::detect(flags.color.unwrap_or(ColorChoice::Auto));
+                eprint!("{}", rail::render(&report, &term));
+            } else if !matches!(applied, Some(Err(_))) {
+                stdout_text = Some(match format {
+                    Format::JsonRich => format!("{}\n", machine::json_rich(&report)),
+                    Format::Short => machine::short(&report),
+                    _ => machine::github(&report),
+                });
+            }
         }
         if let Some(Err(e)) = applied {
             return Err(e);
