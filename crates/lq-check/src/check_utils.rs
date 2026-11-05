@@ -134,3 +134,86 @@ pub fn node_text<'s>(source: &'s str, node: &Node<'_>) -> &'s str {
     let p = node.position();
     lq_syntax::js::slice(source, p.start, p.end)
 }
+
+/// A name as hints compare it: ignoring case, and with `-` the same as `_`.
+fn fold_name(name: &str) -> Vec<char> {
+    name.chars().map(|c| if c == '-' { '_' } else { c.to_ascii_lowercase() }).collect()
+}
+
+/// The optimal string alignment distance, or `None` once it must be over `limit`.
+fn bounded_distance(a: &[char], b: &[char], limit: usize) -> Option<usize> {
+    let mut before = vec![0; b.len() + 1];
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    let mut row = vec![0; b.len() + 1];
+    for i in 1..=a.len() {
+        row[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            row[j] = (previous[j] + 1).min(row[j - 1] + 1).min(previous[j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                row[j] = row[j].min(before[j - 2] + 1);
+            }
+        }
+        // A transposition reaches back two rows, so both have to be over the limit.
+        if row.iter().min() > Some(&limit) && previous.iter().min() > Some(&limit) {
+            return None;
+        }
+        std::mem::swap(&mut before, &mut previous);
+        std::mem::swap(&mut previous, &mut row);
+    }
+    let distance = previous[b.len()];
+    (distance <= limit).then_some(distance)
+}
+
+/// The candidate `name` was most likely meant to be, or `None` if none is close: a wrong guess
+/// is worse than no guess. For a report's hints only, never for deciding what to report.
+pub fn closest<'c>(name: &str, candidates: impl IntoIterator<Item = &'c str>) -> Option<&'c str> {
+    let folded = fold_name(name);
+    if folded.len() < 3 {
+        return None;
+    }
+    let limit = (folded.len() / 4).clamp(1, 3);
+    candidates
+        .into_iter()
+        .filter(|c| *c != name && c.chars().count().abs_diff(folded.len()) <= limit)
+        .filter_map(|c| bounded_distance(&folded, &fold_name(c), limit).map(|d| (d, c)))
+        .min()
+        .map(|(_, c)| c)
+}
+
+pub fn did_you_mean(candidate: &str) -> String {
+    format!("did you mean '{candidate}'?")
+}
+
+#[cfg(test)]
+mod closest_tests {
+    use super::closest;
+
+    #[test]
+    fn finds_near_names_only() {
+        let names = ["product-card", "image", "button", "price_list"];
+        assert_eq!(closest("product-crad", names), Some("product-card"));
+        assert_eq!(closest("product_card", names), Some("product-card"));
+        assert_eq!(closest("imag", names), Some("image"));
+        assert_eq!(closest("Button", names), Some("button"));
+        assert_eq!(closest("vite-tag", names), None);
+        assert_eq!(closest("xy", ["xz"]), None);
+    }
+
+    #[test]
+    fn a_transposition_counts_as_one_edit() {
+        assert_eq!(closest("abcd", ["abdc"]), Some("abdc"));
+        assert_eq!(closest("subtitel", ["subtitle"]), Some("subtitle"));
+    }
+
+    #[test]
+    fn never_suggests_the_name_itself() {
+        assert_eq!(closest("image", ["image"]), None);
+    }
+
+    #[test]
+    fn a_tie_is_decided_the_same_way_every_time() {
+        assert_eq!(closest("cart", ["cars", "carp"]), Some("carp"));
+        assert_eq!(closest("cart", ["carp", "cars"]), Some("carp"));
+    }
+}
