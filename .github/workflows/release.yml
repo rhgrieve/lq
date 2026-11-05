@@ -1,0 +1,123 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds every platform, packs one npm tarball, tests it on each
+# platform, and attaches it to a GitHub release. The tag must match Cargo.toml's version.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+env:
+  # theme-tools tag whose license text ships in the tarball. See README, re-pinning.
+  UPSTREAM_TAG: '@shopify/theme-check-node@3.31.0'
+  PRETTIER_VERSION: '3.9.10'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { platform: darwin-arm64, runner: macos-15, target: aarch64-apple-darwin }
+          - { platform: darwin-x64, runner: macos-15-intel, target: x86_64-apple-darwin }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { platform: linux-x64, runner: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable && rustup default stable && rustup target add ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo test --workspace --locked --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p lq-cli --target ${{ matrix.target }}
+      - run: target/${{ matrix.target }}/release/lq --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lq-${{ matrix.platform }}
+          path: target/${{ matrix.target }}/release/lq
+          if-no-files-found: error
+          retention-days: 3
+
+  pack:
+    needs: build
+    runs-on: ubuntu-24.04
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Arrange binaries
+        run: |
+          for d in artifacts/lq-*; do
+            platform="${d#artifacts/lq-}"
+            mkdir -p "vendor/$platform"
+            mv "$d/lq" "vendor/$platform/lq"
+          done
+      - name: Fetch upstream license texts
+        run: |
+          mkdir -p upstream/theme-tools upstream/prettier
+          curl -fsSL "https://raw.githubusercontent.com/Shopify/theme-tools/$UPSTREAM_TAG/LICENSE.md" -o upstream/theme-tools/LICENSE.md
+          curl -fsSL "https://raw.githubusercontent.com/prettier/prettier/$PRETTIER_VERSION/LICENSE" -o upstream/prettier/LICENSE
+      - id: pack
+        name: Pack
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          tarball="$(node scripts/pack-npm.mjs --vendor vendor --out dist --upstream upstream --version "$version")"
+          echo "tarball=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 3
+
+  test:
+    needs: pack
+    strategy:
+      fail-fast: true
+      matrix:
+        runner: [macos-15, macos-15-intel, ubuntu-24.04-arm, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: dist
+      - name: Install the tarball and run it
+        shell: bash
+        run: |
+          mkdir smoke && cd smoke
+          npm init -y >/dev/null
+          npm install "../dist/${{ needs.pack.outputs.tarball }}"
+          npx lq --version
+          mkdir -p snippets
+          printf '<div>{{a}}</div>\n' > snippets/a.liquid
+          printf '<div>{{ a }}</div>\n' > expected.liquid
+          npx lq fmt --stdin-filepath snippets/a.liquid < snippets/a.liquid > out.liquid
+          cmp out.liquid expected.liquid
+          npx lq check --output json > /dev/null || [ $? -eq 1 ]
+
+  release:
+    needs: [pack, test]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tgz --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

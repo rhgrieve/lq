@@ -15,13 +15,42 @@ On Shopify's Horizon theme, `lq check` takes 0.054s against 3.4s for `shopify th
 From source, with a Rust toolchain:
 
 ```sh
-cargo install --path crates/lq-cli    # installs `lq`
+cargo install --path crates/lq-cli --locked    # installs `lq`
 # or
 cargo build --release                 # target/release/lq
 ```
 
 Embedded CSS, JS and TS are formatted with [Biome](https://github.com/biomejs/biome), a git dependency at a pinned
 tag, so the first build needs network access and takes a few minutes. Nothing does afterwards.
+
+### From a GitHub release
+
+Each release attaches an npm tarball with binaries for macOS and Linux, on arm64 and x64. Add it to `package.json`:
+
+```json
+{
+  "devDependencies": {
+    "lq": "https://github.com/OWNER/lq/releases/download/v0.1.0/lq-theme-check-0.1.0.tgz"
+  }
+}
+```
+
+The repository must be public, because npm requests the file without GitHub credentials. There's no install script, and
+nothing is downloaded at run time. Windows isn't included.
+
+Node's startup is most of the run time on a small theme, so how you call it matters. On Dawn:
+
+| how | `lq check` |
+|---|---|
+| the binary directly | 33ms |
+| `node_modules/.bin/lq`, or `lq` in an npm script | 80ms |
+| `npx lq` | 275ms |
+
+To skip Node in a script, get the binary's path first:
+
+```sh
+"$(node_modules/.bin/lq --print-binary-path)" check
+```
 
 ## Usage
 
@@ -68,9 +97,9 @@ Prettier. `lq check` ignores files that aren't in the theme.
 ### CI
 
 ```yaml
-- run: cargo install --git <this repo> --locked lq-cli
-- run: lq check --output json > theme-check.json
-- run: lq fmt "**/*.liquid" --check
+- run: npm ci # with lq in package.json, as above
+- run: npx lq check --output json > theme-check.json
+- run: npx lq fmt "**/*.liquid" --check
 ```
 
 Exit codes: `lq check` gives 0 when clean, 1 for offenses at or above the fail level or a bad config, and 2 for bad
@@ -198,6 +227,19 @@ Apple M3 Max, 14 cores, 36 GB, Darwin 25.1.0, 2026-11-05. Horizon at `9960490` (
 
 Re-run with `scripts/bench.sh [--runs N] [theme]`. It's read-only, needs nothing beyond bash and what it measures, and
 runs a fresh process each time. "Cold" means no daemon or cache of ours: the OS file cache stays warm.
+
+## Releasing
+
+1. Set the version in `Cargo.toml`'s `[workspace.package]`, and commit it with the updated `Cargo.lock`.
+2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+
+`.github/workflows/release.yml` then builds all four platforms and runs the tests on each, packs one tarball with
+`scripts/pack-npm.mjs`, installs and runs that tarball on each platform, and attaches it to a new GitHub release. The tag
+must match `Cargo.toml`, or packing fails. Linux binaries are static (musl), so they don't depend on the host's glibc.
+
+To build a tarball locally for this machine only, put the binary at `<vendor>/<platform>-<arch>/lq`, then run
+`node scripts/pack-npm.mjs --vendor <vendor> --out dist --upstream <dir> --allow-missing`. `<dir>` holds
+`theme-tools/LICENSE.md` and `prettier/LICENSE`.
 
 ## Re-pinning to a new upstream release
 

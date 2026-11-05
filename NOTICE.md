@@ -13,3 +13,6 @@ https://github.com/Shopify/theme-liquid-docs (MIT).
 Biome (MIT) formats embedded JS, TS and CSS. `lq` differs from upstream where listed in `DIVERGENCES.md`.
 
 `lq` is not affiliated with or endorsed by Shopify.
+
+Release tarballs include `THIRD_PARTY_LICENSES.md`, with the license text of everything compiled into the binary. Run
+`scripts/third-party-licenses.mjs` to generate it.
