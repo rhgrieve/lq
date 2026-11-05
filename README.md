@@ -58,7 +58,12 @@ To skip Node in a script, get the binary's path first:
 lq check                              # lint the theme in the current directory
 lq check --path themes/main           # lint a theme elsewhere
 lq check snippets/a.liquid            # report only this file; the whole theme is still loaded
-lq check --output json                # JSON on stdout, as upstream
+lq check --output json                # upstream's JSON on stdout
+lq check --output short               # one line per offense, for grep, editors and agents
+lq check --output github              # annotations for GitHub Actions
+lq check --output json-rich           # the whole text report as data, hints included
+lq check --output upstream            # upstream's text layout
+lq explain MissingTemplate            # what a check does, and how to configure or disable it
 lq check --fail-level warning         # exit 1 on warnings too
 lq check --auto-correct               # apply safe fixes in place
 lq check --timings                    # time per phase, on stderr
@@ -68,8 +73,9 @@ lq fmt "**/*.liquid" --write          # rewrite files in place
 lq fmt --stdin-filepath a.liquid      # stdin to stdout, using the config for that path
 ```
 
-`lq --help`, `lq check --help` and `lq fmt --help` list everything. `lq check` accepts upstream's offline flags and
-prints upstream's layout: text on stderr, JSON on stdout. `lq fmt` behaves like `prettier` for Liquid files.
+`lq --help`, `lq check --help` and `lq fmt --help` list everything. `lq check` accepts upstream's offline flags. Its
+JSON is upstream's, byte for byte. Its text report is its own: see [Reports](#reports). `lq fmt` behaves like `prettier`
+for Liquid files.
 
 File arguments to `lq check` narrow what is *reported*, and what decides the exit code. If other files have errors, a note on stderr says how many. The whole theme is still
 loaded, so cross-file checks stay correct: a file's offenses are the same either way. Paths may be relative to the
@@ -93,13 +99,46 @@ pre-commit:
 Without a `glob`, add `--ignore-unknown` to `lq fmt`, so that other files are skipped rather than errors, as with
 Prettier. `lq check` ignores files that aren't in the theme.
 
+### Reports
+
+The default report is for reading in a terminal. Each diagnostic has a clickable `path:line:col`, the code around it with
+the problem underlined, and what to do next:
+
+```
+warning UnrecognizedRenderSnippetArguments
+Unknown argument 'subtitel' in render tag for snippet 'card'.
+  ╭─ sections/main.liquid:4:31
+  │
+3 │ {% render 'hero' %}
+4 │ {% render 'card', title: 'a', subtitel: 'b' %}
+  ·                               ━━━━━━━━━━━━━ unknown argument
+5 │ {% render 'footer' %}
+  │
+  ├ note did you mean 'subtitle'?
+  ├ note snippets/card.liquid declares title, subtitle
+  ├ try  Remove 'subtitel'
+  │      - {% render 'card', title: 'a', subtitel: 'b' %}
+  │      + {% render 'card', title: 'a' %}
+  ╰ docs lq explain UnrecognizedRenderSnippetArguments
+```
+
+`fix` is a change `--auto-correct` applies. `try` is a suggestion it leaves to you. Repeats of the same problem are
+folded under `also`, one location per line, and `--no-fold` prints each in full. The summary at the end says what was
+found, and why the run passed or failed.
+
+Color follows `--color auto|always|never`, `NO_COLOR`, `FORCE_COLOR` and `CLICOLOR_FORCE`, and the width follows `COLUMNS`
+or the terminal. Text from theme files can't send escape sequences to your terminal.
+
 ### CI
 
 ```yaml
 - run: npm ci # with lq in package.json, as above
-- run: npx lq check --output json > theme-check.json
+- run: npx lq check --output github # annotations on the pull request
 - run: npx lq fmt "**/*.liquid" --check
 ```
+
+GitHub limits how many annotations it displays per step, so on a theme with many offenses keep the full report as well,
+with `--output json` or `--output json-rich`.
 
 Exit codes: `lq check` gives 0 when clean, 1 for offenses at or above the fail level or a bad config, and 2 for bad
 usage. `lq fmt` gives 0 when clean, 1 when `--check` or `--list-different` found differences, and 2 for errors.
@@ -211,6 +250,9 @@ The biggest in practice: a JSON template section with no `type`, which is a legi
 upstream's graph fail silently and reports every snippet as orphaned. On the private production theme, default mode removes
 118 false `OrphanedSnippet` offenses of 119. That is the only difference from upstream on that theme, and Dawn and
 Horizon have none.
+
+`lq`'s text report is also a deliberate difference, of another kind: see
+[DIVERGENCES.md](DIVERGENCES.md#presentation). `--upstream-bugs` or `--output upstream` prints upstream's layout.
 
 ## Benchmarks
 

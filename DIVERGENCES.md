@@ -40,6 +40,30 @@ unexplained fails.
 | `UnclosedTagHint` | `LiquidHTMLSyntaxError` | `<div>{% for a in b %}{% render c %\n{% endfor %}</div>` | The missing `%}` makes the tag run on to `{% endfor %}`, so the error is reported on the later `</div>`: `Attempting to close HtmlElement 'div' before it was opened` | Reported on the unclosed tag, with upstream's message after `That caused:`. Tags whose opener is inside quotes, and bodies of `comment`, `raw`, `doc` and `schema`, are ignored | `scripts/parity/divergences.mjs` |
 | `AutofixAbort` | engine | `lq check --auto-correct` on a theme with a locale starting `/* ... */` that has a missing translation, plus any other fixable offense | `JSON.parse` in the JSON corrector rejects the comment, and the run stops: no fix is applied after that point, even in unrelated Liquid files. `shopify theme check --auto-correct` therefore fixes nothing on such themes | The locale is skipped with a warning on stderr, since rewriting it would drop the comment header, and every other fix is applied | `scripts/parity/autofix.mjs` |
 
+## Presentation
+
+The table above is bugs. The default text report is a different kind of difference: a choice about how offenses are
+presented, with no upstream bug behind it.
+
+**The rule: which offenses are found, and upstream's JSON, stay identical. Only human-facing presentation diverges.**
+
+| Surface | Status |
+|---|---|
+| `--output json` | Upstream's format, unchanged: no new fields, even for `lq`'s hints |
+| `--output upstream`, or `--upstream-bugs` with no `--output` | Upstream's text layout, unchanged |
+| `--output text`, the default | `lq`'s report, with snippets, hints, fix previews and folding |
+| `--output short`, `github`, `json-rich`, `lq explain` | `lq`'s own, with no upstream equivalent |
+| Offenses, messages, positions, fixes, suggestions, exit codes | Not presentation: the same in every format |
+
+Hints are set with `Problem::label`, `note` and `note_at`, and travel in `Offense.hints`, apart from everything the
+goldens and `lint.mjs` compare. They're not a `Divergence`, because no check behaves differently, so `divergences.mjs`
+has nothing to prove about them.
+
+**Proof.** The parity gates all read `--output json` and don't change. `crates/lq-cli/tests/report.rs` pins the rest: every
+location in the JSON appears in `text`, `short`, `github` and `json-rich`, on the fixture and on the reference themes, so
+folding can't hide an offense; the exit code is the same in every format at every `--fail-level`; and the JSON carries
+none of `lq`'s fields.
+
 ## Notes on individual fixes
 
 **`AddArgumentSuggestion`, the value.** Upstream's value for a type with no literal default (`object`, a drop, or no
