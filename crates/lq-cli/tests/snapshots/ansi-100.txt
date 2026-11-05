@@ -1,0 +1,264 @@
+
+[1;31merror[0m [1mMatchingTranslations[0m
+The translation for 'only.a' is missing
+  [90m╭─[0m [36mlocales/de.json:2:1[0m
+  [90m│[0m
+[90m1[0m [90m│[0m [2;90m/* generated */[0m
+[90m2[0m [90m│[0m {[36m"greeting"[0m:{[36m"hello"[0m:[32m"Hallo"[0m}}
+  [90m·[0m [1;31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+  [90m│[0m
+  [90m├[0m [1mfix [0m --auto-correct can't change this file, so make this change by hand: JSON.parse: Invalid
+  [90m│[0m      comment token found. at byte 0
+  [90m│[0m      [32m+ only.a = "TODO"[0m
+  [90m╰[0m [1mdocs[0m lq explain MatchingTranslations
+
+[1;31merror[0m [1mMatchingTranslations[0m
+The translation for 'only.b' is missing
+  [90m╭─[0m [36mlocales/de.json:2:1[0m
+  [90m│[0m
+[90m1[0m [90m│[0m [2;90m/* generated */[0m
+[90m2[0m [90m│[0m {[36m"greeting"[0m:{[36m"hello"[0m:[32m"Hallo"[0m}}
+  [90m·[0m [1;31m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+  [90m│[0m
+  [90m├[0m [1mfix [0m --auto-correct can't change this file, so make this change by hand: JSON.parse: Invalid
+  [90m│[0m      comment token found. at byte 0
+  [90m│[0m      [32m+ only.b = "TODO"[0m
+  [90m├[0m [1malso[0m the same problem in 1 more place
+  [90m│[0m      [36mlocales/fr.json:6:3[0m
+  [90m╰[0m [1mdocs[0m lq explain MatchingTranslations
+
+[1;31merror[0m [1mMatchingTranslations[0m
+A default translation for 'grreting' does not exist
+  [90m╭─[0m [36mlocales/fr.json:5:3[0m
+  [90m│[0m
+[90m4[0m [90m│[0m [2m},[0m
+[90m5[0m [90m│[0m [36m"grreting"[0m: [32m"x"[0m,
+  [90m·[0m [1;31m━━━━━━━━━━━━━━━[0m
+[90m6[0m [90m│[0m [2;36m"only"[0m[2m: {[0m
+  [90m│[0m
+  [90m├[0m [1mtry [0m Delete unneeded translation key
+  [90m│[0m      [31m- grreting[0m
+  [90m╰[0m [1mdocs[0m lq explain MatchingTranslations
+
+[1;33mwarning[0m [1mUndefinedObject[0m
+Unknown object 'crlf_thing' used.
+  [90m╭─[0m [36msections/crlf.liquid:2:4[0m
+  [90m│[0m
+[90m1[0m [90m│[0m [2;34m<p>[0m
+[90m2[0m [90m│[0m [36m{{[0m crlf_thing [36m}}[0m
+  [90m·[0m    [1;33m━━━━━━━━━━ not defined[0m
+[90m3[0m [90m│[0m [2;34m</p>[0m
+  [90m│[0m
+  [90m╰[0m [1mdocs[0m lq explain UndefinedObject
+
+[1;31merror[0m [1mMissingTemplate[0m
+'snippets/crad.liquid' does not exist
+  [90m╭─[0m [36msections/main.liquid:1:11[0m
+  [90m│[0m
+[90m1[0m [90m│[0m [36m{%[0m [35mrender[0m [32m'crad'[0m [36m%}[0m
+  [90m·[0m           [1;31m━━━━━━ not found[0m
+[90m2[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'nothing-like-it'[0m[2m [0m[2;36m%}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m did you mean 'card'?
+  [90m╰[0m [1mdocs[0m lq explain MissingTemplate
+
+[1;31merror[0m [1mMissingTemplate[0m
+'snippets/nothing-like-it.liquid' does not exist
+  [90m╭─[0m [36msections/main.liquid:2:11[0m
+  [90m│[0m
+[90m1[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'crad'[0m[2m [0m[2;36m%}[0m
+[90m2[0m [90m│[0m [36m{%[0m [35mrender[0m [32m'nothing-like-it'[0m [36m%}[0m
+  [90m·[0m           [1;31m━━━━━━━━━━━━━━━━━ not found[0m
+[90m3[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'nothing-like-it'[0m[2m [0m[2;36m%}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m if a build step generates this file, list it in this check's ignoreMissing setting
+  [90m├[0m [1malso[0m the same problem in 1 more place
+  [90m│[0m      [36msections/main.liquid:3:11[0m
+  [90m╰[0m [1mdocs[0m lq explain MissingTemplate
+
+[1;33mwarning[0m [1mUnrecognizedRenderSnippetArguments[0m
+Unknown argument 'subtitel' in render tag for snippet 'card'.
+  [90m╭─[0m [36msections/main.liquid:4:31[0m
+  [90m│[0m
+[90m3[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'nothing-like-it'[0m[2m [0m[2;36m%}[0m
+[90m4[0m [90m│[0m [36m{%[0m [35mrender[0m [32m'card'[0m, title: [32m'a'[0m, subtitel: [32m'b'[0m [36m%}[0m
+  [90m·[0m                               [1;33m━━━━━━━━━━━━━ unknown argument[0m
+[90m5[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'card'[0m[2m [0m[2;36m%}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m did you mean 'subtitle'?
+  [90m├[0m [1mnote[0m snippets/card.liquid declares title, subtitle
+  [90m├[0m [1mtry [0m Remove 'subtitel'
+  [90m│[0m      [31m- {% render 'card', title: 'a', subtitel: 'b' %}[0m
+  [90m│[0m      [32m+ {% render 'card', title: 'a' %}[0m
+  [90m╰[0m [1mdocs[0m lq explain UnrecognizedRenderSnippetArguments
+
+[1;33mwarning[0m [1mMissingRenderSnippetArguments[0m
+Missing required argument 'title' in render tag for snippet 'card'.
+  [90m╭─[0m [36msections/main.liquid:5:11[0m
+  [90m│[0m
+[90m4[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'card'[0m[2m, title: [0m[2;32m'a'[0m[2m, subtitel: [0m[2;32m'b'[0m[2m [0m[2;36m%}[0m
+[90m5[0m [90m│[0m [36m{%[0m [35mrender[0m [32m'card'[0m [36m%}[0m
+  [90m·[0m           [1;33m━━━━━━━[0m
+[90m6[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'a'[0m[2m | [0m[2;34mupcas[0m[2m [0m[2;36m}}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m snippets/card.liquid declares @param {string} title: The title
+  [90m├[0m [1mtry [0m Add required argument 'title'
+  [90m│[0m      [31m- {% render 'card' %}[0m
+  [90m│[0m      [32m+ {% render 'card', title: '' %}[0m
+  [90m╰[0m [1mdocs[0m lq explain MissingRenderSnippetArguments
+
+[1;31merror[0m [1mUnknownFilter[0m
+Unknown filter 'upcas' used.
+  [90m╭─[0m [36msections/main.liquid:6:8[0m
+  [90m│[0m
+[90m5[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mrender[0m[2m [0m[2;32m'card'[0m[2m [0m[2;36m%}[0m
+[90m6[0m [90m│[0m [36m{{[0m [32m'a'[0m | [34mupcas[0m [36m}}[0m
+  [90m·[0m        [1;31m━━━━━━━[0m
+[90m7[0m [90m│[0m [2;36m{{[0m[2m produt.title [0m[2;36m}}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m did you mean 'upcase'?
+  [90m╰[0m [1mdocs[0m lq explain UnknownFilter
+
+[1;33mwarning[0m [1mUndefinedObject[0m
+Unknown object 'produt' used.
+  [90m╭─[0m [36msections/main.liquid:7:4[0m
+  [90m│[0m
+[90m6[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'a'[0m[2m | [0m[2;34mupcas[0m[2m [0m[2;36m}}[0m
+[90m7[0m [90m│[0m [36m{{[0m produt.title [36m}}[0m
+  [90m·[0m    [1;33m━━━━━━━━━━━━ not defined[0m
+[90m8[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'greeting.helo'[0m[2m | [0m[2;34mt[0m[2m [0m[2;36m}}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m did you mean 'product'?
+  [90m╰[0m [1mdocs[0m lq explain UndefinedObject
+
+[1;31merror[0m [1mTranslationKeyExists[0m
+'greeting.helo' does not have a matching entry in 'locales/en.default.json'
+  [90m╭─[0m [36msections/main.liquid:8:4[0m
+  [90m│[0m
+[90m7[0m [90m│[0m [2;36m{{[0m[2m produt.title [0m[2;36m}}[0m
+[90m8[0m [90m│[0m [36m{{[0m [32m'greeting.helo'[0m | [34mt[0m [36m}}[0m
+  [90m·[0m    [1;31m━━━━━━━━━━━━━━━ no such key[0m
+[90m9[0m [90m│[0m [2m        [0m[2;36m{{[0m[2m tabbed_thing [0m[2;36m}}[0m
+  [90m│[0m
+  [90m├[0m [1mnote[0m did you mean 'greeting.hello'?
+  [90m╰[0m [1mdocs[0m lq explain TranslationKeyExists
+
+[1;33mwarning[0m [1mUndefinedObject[0m
+Unknown object 'tabbed_thing' used.
+   [90m╭─[0m [36msections/main.liquid:9:6[0m
+   [90m│[0m
+[90m 8[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'greeting.helo'[0m[2m | [0m[2;34mt[0m[2m [0m[2;36m}}[0m
+[90m 9[0m [90m│[0m         [36m{{[0m tabbed_thing [36m}}[0m
+   [90m·[0m            [1;33m━━━━━━━━━━━━ not defined[0m
+[90m10[0m [90m│[0m [2;34m<p>[0m[2m日本語のテキスト [0m[2;36m{{[0m[2m wide_thing [0m[2;36m}}[0m[2;34m</p>[0m
+   [90m│[0m
+   [90m╰[0m [1mdocs[0m lq explain UndefinedObject
+
+[1;33mwarning[0m [1mUndefinedObject[0m
+Unknown object 'wide_thing' used.
+   [90m╭─[0m [36msections/main.liquid:10:16[0m
+   [90m│[0m
+[90m 9[0m [90m│[0m [2m        [0m[2;36m{{[0m[2m tabbed_thing [0m[2;36m}}[0m
+[90m10[0m [90m│[0m [34m<p>[0m日本語のテキスト [36m{{[0m wide_thing [36m}}[0m[34m</p>[0m
+   [90m·[0m                        [1;33m━━━━━━━━━━ not defined[0m
+[90m11[0m [90m│[0m [2;34m<p[0m[2m [0m[2;36mclass[0m[2m=[0m[2;32m"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[0m[2m…[0m
+   [90m│[0m
+   [90m╰[0m [1mdocs[0m lq explain UndefinedObject
+
+[1;33mwarning[0m [1mUndefinedObject[0m
+Unknown object 'long_thing' used.
+   [90m╭─[0m [36msections/main.liquid:11:316[0m
+   [90m│[0m
+[90m10[0m [90m│[0m [2;34m<p>[0m[2m日本語のテキスト [0m[2;36m{{[0m[2m wide_thing [0m[2;36m}}[0m[2;34m</p>[0m
+[90m11[0m [90m│[0m …[32mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"[0m[34m>[0m[36m{{[0m long_thing [36m}}[0m[34m</p>[0m
+   [90m·[0m                                           [1;33m━━━━━━━━━━ not defined[0m
+[90m12[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'esc�[31mape.key'[0m[2m | [0m[2;34mt[0m[2m [0m[2;36m}}[0m
+   [90m│[0m
+   [90m╰[0m [1mdocs[0m lq explain UndefinedObject
+
+[1;31merror[0m [1mTranslationKeyExists[0m
+'esc�[31mape.key' does not have a matching entry in 'locales/en.default.json'
+   [90m╭─[0m [36msections/main.liquid:12:4[0m
+   [90m│[0m
+[90m11[0m [90m│[0m [2;34m<p[0m[2m [0m[2;36mclass[0m[2m=[0m[2;32m"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx[0m[2m…[0m
+[90m12[0m [90m│[0m [36m{{[0m [32m'esc�[31mape.key'[0m | [34mt[0m [36m}}[0m
+   [90m·[0m    [1;31m━━━━━━━━━━━━━━━━━ no such key[0m
+[90m13[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mif[0m[2m a [0m[2;36m%}[0m[2;34m<div>[0m[2;36m{%[0m[2m [0m[2;35mendif[0m[2m [0m[2;36m%}[0m
+   [90m│[0m
+   [90m╰[0m [1mdocs[0m lq explain TranslationKeyExists
+
+[1;33mwarning[0m [1mUndefinedObject[0m
+Unknown object 'a' used.
+   [90m╭─[0m [36msections/main.liquid:13:7[0m
+   [90m│[0m
+[90m12[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'esc�[31mape.key'[0m[2m | [0m[2;34mt[0m[2m [0m[2;36m}}[0m
+[90m13[0m [90m│[0m [36m{%[0m [35mif[0m a [36m%}[0m[34m<div>[0m[36m{%[0m [35mendif[0m [36m%}[0m
+   [90m·[0m       [1;33m━ not defined[0m
+[90m14[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35massign[0m[2m unused = [0m[2;33m1[0m[2m [0m[2;36m%}[0m
+   [90m│[0m
+   [90m╰[0m [1mdocs[0m lq explain UndefinedObject
+
+[1;33mwarning[0m [1mUnclosedHTMLElement[0m
+Opening tag does not have a matching closing tag for condition `a` in Document 'Document'
+   [90m╭─[0m [36msections/main.liquid:13:11[0m
+   [90m│[0m
+[90m12[0m [90m│[0m [2;36m{{[0m[2m [0m[2;32m'esc�[31mape.key'[0m[2m | [0m[2;34mt[0m[2m [0m[2;36m}}[0m
+[90m13[0m [90m│[0m [36m{%[0m [35mif[0m a [36m%}[0m[34m<div>[0m[36m{%[0m [35mendif[0m [36m%}[0m
+   [90m·[0m           [1;33m━━━━━ never closed in this branch[0m
+[90m14[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35massign[0m[2m unused = [0m[2;33m1[0m[2m [0m[2;36m%}[0m
+   [90m│[0m
+   [90m├[0m [1mnote[0m a condition's branches have to open and close the same tags, or the HTML is broken when
+   [90m│[0m      only one of them runs
+   [90m╰[0m [1mdocs[0m lq explain UnclosedHTMLElement
+
+[1;33mwarning[0m [1mUnusedAssign[0m
+The variable 'unused' is assigned but not used
+   [90m╭─[0m [36msections/main.liquid:14:1[0m
+   [90m│[0m
+[90m13[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35mif[0m[2m a [0m[2;36m%}[0m[2;34m<div>[0m[2;36m{%[0m[2m [0m[2;35mendif[0m[2m [0m[2;36m%}[0m
+[90m14[0m [90m│[0m [36m{%[0m [35massign[0m unused = [33m1[0m [36m%}[0m
+   [90m·[0m [1;33m━━━━━━━━━━━━━━━━━━━━━━━[0m
+[90m15[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35massign[0m[2m x = [0m[2;32m'a'[0m[2m | [0m[2;34mimg_url[0m[2m [0m[2;36m%}{{[0m[2m x [0m[2;36m}}[0m
+   [90m│[0m
+   [90m├[0m [1mtry [0m Remove the unused variable 'unused'
+   [90m│[0m      [31m- {% assign unused = 1 %}[0m
+   [90m╰[0m [1mdocs[0m lq explain UnusedAssign
+
+[1;33mwarning[0m [1mDeprecatedFilter[0m
+Deprecated filter 'img_url', consider using 'image_url'.
+   [90m╭─[0m [36msections/main.liquid:15:19[0m
+   [90m│[0m
+[90m14[0m [90m│[0m [2;36m{%[0m[2m [0m[2;35massign[0m[2m unused = [0m[2;33m1[0m[2m [0m[2;36m%}[0m
+[90m15[0m [90m│[0m [36m{%[0m [35massign[0m x = [32m'a'[0m | [34mimg_url[0m [36m%}{{[0m x [36m}}[0m
+   [90m·[0m                   [1;33m━━━━━━━━━[0m
+   [90m│[0m
+   [90m├[0m [1mtry [0m Replace 'img_url' with 'image_url'.
+   [90m│[0m      [31m- {% assign x = 'a' | img_url %}{{ x }}[0m
+   [90m│[0m      [32m+ {% assign x = 'a' | image_url: width: 100, height: 100 %}{{ x }}[0m
+   [90m╰[0m [1mdocs[0m lq explain DeprecatedFilter
+
+[1;33mwarning[0m [1mOrphanedSnippet[0m
+This snippet is not referenced by any other files
+  [90m╭─[0m [36msnippets/orphan.liquid:1:1[0m
+  [90m│[0m
+  [90m╰[0m [1mdocs[0m lq explain OrphanedSnippet
+
+[1;31m✖ 10 errors[0m   [1;33m▲ 12 warnings[0m
+
+  6 [1;33m████████████████[0m UndefinedObject
+  4 [1;31m███████████[0m      MatchingTranslations
+  3 [1;31m████████[0m         MissingTemplate
+  2 [1;31m██████[0m           TranslationKeyExists
+  1 [1;31m███[0m              UnknownFilter
+  1 [1;33m███[0m              DeprecatedFilter
+  1 [1;33m███[0m              MissingRenderSnippetArguments
+  1 [1;33m███[0m              OrphanedSnippet
+  1 [1;33m███[0m              UnclosedHTMLElement
+  1 [1;33m███[0m              UnrecognizedRenderSnippetArguments
+  1 [1;33m███[0m              UnusedAssign
+
+[32m→[0m 1 offense can be fixed with lq check --auto-correct
+[1;33m→[0m 2 offenses have a fix --auto-correct can't apply, shown as "fix"
+[32m→[0m 5 offenses have a suggested change, shown as "try"
+22 offenses in 5 of 8 files checked in <time>
+[1;31mfailed:[0m 10 offenses at fail level error; the other 12 don't fail this run

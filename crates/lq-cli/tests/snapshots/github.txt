@@ -1,0 +1,22 @@
+::error file=locales/de.json,line=2,col=1,endLine=2,endColumn=31,title=MatchingTranslations::The translation for 'only.a' is missing
+::error file=locales/de.json,line=2,col=1,endLine=2,endColumn=31,title=MatchingTranslations::The translation for 'only.b' is missing
+::error file=locales/fr.json,line=5,col=3,endLine=5,endColumn=18,title=MatchingTranslations::A default translation for 'grreting' does not exist
+::error file=locales/fr.json,line=6,col=3,endLine=8,endColumn=4,title=MatchingTranslations::The translation for 'only.b' is missing
+::warning file=sections/crlf.liquid,line=2,col=4,endLine=2,endColumn=14,title=UndefinedObject::Unknown object 'crlf_thing' used.
+::error file=sections/main.liquid,line=1,col=11,endLine=1,endColumn=17,title=MissingTemplate::'snippets/crad.liquid' does not exist
+::error file=sections/main.liquid,line=2,col=11,endLine=2,endColumn=28,title=MissingTemplate::'snippets/nothing-like-it.liquid' does not exist
+::error file=sections/main.liquid,line=3,col=11,endLine=3,endColumn=28,title=MissingTemplate::'snippets/nothing-like-it.liquid' does not exist
+::warning file=sections/main.liquid,line=4,col=31,endLine=4,endColumn=44,title=UnrecognizedRenderSnippetArguments::Unknown argument 'subtitel' in render tag for snippet 'card'.
+::warning file=sections/main.liquid,line=5,col=11,endLine=5,endColumn=18,title=MissingRenderSnippetArguments::Missing required argument 'title' in render tag for snippet 'card'.
+::error file=sections/main.liquid,line=6,col=8,endLine=6,endColumn=15,title=UnknownFilter::Unknown filter 'upcas' used.
+::warning file=sections/main.liquid,line=7,col=4,endLine=7,endColumn=16,title=UndefinedObject::Unknown object 'produt' used.
+::error file=sections/main.liquid,line=8,col=4,endLine=8,endColumn=19,title=TranslationKeyExists::'greeting.helo' does not have a matching entry in 'locales/en.default.json'
+::warning file=sections/main.liquid,line=9,col=6,endLine=9,endColumn=18,title=UndefinedObject::Unknown object 'tabbed_thing' used.
+::warning file=sections/main.liquid,line=10,col=16,endLine=10,endColumn=26,title=UndefinedObject::Unknown object 'wide_thing' used.
+::warning file=sections/main.liquid,line=11,col=316,endLine=11,endColumn=326,title=UndefinedObject::Unknown object 'long_thing' used.
+::error file=sections/main.liquid,line=12,col=4,endLine=12,endColumn=21,title=TranslationKeyExists::'esc�[31mape.key' does not have a matching entry in 'locales/en.default.json'
+::warning file=sections/main.liquid,line=13,col=7,endLine=13,endColumn=8,title=UndefinedObject::Unknown object 'a' used.
+::warning file=sections/main.liquid,line=13,col=11,endLine=13,endColumn=16,title=UnclosedHTMLElement::Opening tag does not have a matching closing tag for condition `a` in Document 'Document'
+::warning file=sections/main.liquid,line=14,col=1,endLine=14,endColumn=24,title=UnusedAssign::The variable 'unused' is assigned but not used
+::warning file=sections/main.liquid,line=15,col=19,endLine=15,endColumn=28,title=DeprecatedFilter::Deprecated filter 'img_url', consider using 'image_url'.
+::warning file=snippets/orphan.liquid,line=1,col=1,endLine=1,endColumn=2,title=OrphanedSnippet::This snippet is not referenced by any other files

@@ -1,0 +1,22 @@
+locales/de.json:2:1: error MatchingTranslations: The translation for 'only.a' is missing
+locales/de.json:2:1: error MatchingTranslations: The translation for 'only.b' is missing
+locales/fr.json:5:3: error MatchingTranslations: A default translation for 'grreting' does not exist
+locales/fr.json:6:3: error MatchingTranslations: The translation for 'only.b' is missing
+sections/crlf.liquid:2:4: warning UndefinedObject: Unknown object 'crlf_thing' used.
+sections/main.liquid:1:11: error MissingTemplate: 'snippets/crad.liquid' does not exist
+sections/main.liquid:2:11: error MissingTemplate: 'snippets/nothing-like-it.liquid' does not exist
+sections/main.liquid:3:11: error MissingTemplate: 'snippets/nothing-like-it.liquid' does not exist
+sections/main.liquid:4:31: warning UnrecognizedRenderSnippetArguments: Unknown argument 'subtitel' in render tag for snippet 'card'.
+sections/main.liquid:5:11: warning MissingRenderSnippetArguments: Missing required argument 'title' in render tag for snippet 'card'.
+sections/main.liquid:6:8: error UnknownFilter: Unknown filter 'upcas' used.
+sections/main.liquid:7:4: warning UndefinedObject: Unknown object 'produt' used.
+sections/main.liquid:8:4: error TranslationKeyExists: 'greeting.helo' does not have a matching entry in 'locales/en.default.json'
+sections/main.liquid:9:6: warning UndefinedObject: Unknown object 'tabbed_thing' used.
+sections/main.liquid:10:16: warning UndefinedObject: Unknown object 'wide_thing' used.
+sections/main.liquid:11:316: warning UndefinedObject: Unknown object 'long_thing' used.
+sections/main.liquid:12:4: error TranslationKeyExists: 'esc�[31mape.key' does not have a matching entry in 'locales/en.default.json'
+sections/main.liquid:13:7: warning UndefinedObject: Unknown object 'a' used.
+sections/main.liquid:13:11: warning UnclosedHTMLElement: Opening tag does not have a matching closing tag for condition `a` in Document 'Document'
+sections/main.liquid:14:1: warning UnusedAssign: The variable 'unused' is assigned but not used
+sections/main.liquid:15:19: warning DeprecatedFilter: Deprecated filter 'img_url', consider using 'image_url'.
+snippets/orphan.liquid:1:1: warning OrphanedSnippet: This snippet is not referenced by any other files

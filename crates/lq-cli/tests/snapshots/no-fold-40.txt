@@ -1,0 +1,319 @@
+
+error MatchingTranslations
+The translation for 'only.a' is missing
+  ╭─ locales/de.json:2:1
+  │
+1 │ /* generated */
+2 │ {"greeting":{"hello":"Hallo"}}
+  · ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  │
+  ├ fix  --auto-correct can't change
+  │      this file, so make this change
+  │      by hand: JSON.parse: Invalid
+  │      comment token found. at byte 0
+  │      + only.a = "TODO"
+  ╰ docs lq explain MatchingTranslations
+
+error MatchingTranslations
+The translation for 'only.b' is missing
+  ╭─ locales/de.json:2:1
+  │
+1 │ /* generated */
+2 │ {"greeting":{"hello":"Hallo"}}
+  · ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  │
+  ├ fix  --auto-correct can't change
+  │      this file, so make this change
+  │      by hand: JSON.parse: Invalid
+  │      comment token found. at byte 0
+  │      + only.b = "TODO"
+  ╰ docs lq explain MatchingTranslations
+
+error MatchingTranslations
+A default translation for 'grreting'
+does not exist
+  ╭─ locales/fr.json:5:3
+  │
+4 │ },
+5 │ "grreting": "x",
+  · ━━━━━━━━━━━━━━━
+6 │ "only": {
+  │
+  ├ try  Delete unneeded translation key
+  │      - grreting
+  ╰ docs lq explain MatchingTranslations
+
+error MatchingTranslations
+The translation for 'only.b' is missing
+  ╭─ locales/fr.json:6:3
+  │
+5 │     "grreting": "x",
+6 │ ┃   "only": {
+7 │ ┃     "a": "x"
+8 │ ┃   }
+9 │   }
+  │
+  ├ fix  lq check --auto-correct applies this
+  │      + only.b = "TODO"
+  ╰ docs lq explain MatchingTranslations
+
+warning UndefinedObject
+Unknown object 'crlf_thing' used.
+  ╭─ sections/crlf.liquid:2:4
+  │
+1 │ <p>
+2 │ {{ crlf_thing }}
+  ·    ━━━━━━━━━━ not defined
+3 │ </p>
+  │
+  ╰ docs lq explain UndefinedObject
+
+error MissingTemplate
+'snippets/crad.liquid' does not exist
+  ╭─ sections/main.liquid:1:11
+  │
+1 │ {% render 'crad' %}
+  ·           ━━━━━━ not found
+2 │ {% render 'nothing-like-it' %}
+  │
+  ├ note did you mean 'card'?
+  ╰ docs lq explain MissingTemplate
+
+error MissingTemplate
+'snippets/nothing-like-it.liquid' does
+not exist
+  ╭─ sections/main.liquid:2:11
+  │
+1 │ {% render 'crad' %}
+2 │ {% render 'nothing-like-it' %}
+  ·           ━━━━━━━━━━━━━━━━━
+  · not found
+3 │ {% render 'nothing-like-it' %}
+  │
+  ├ note if a build step generates this
+  │      file, list it in this check's
+  │      ignoreMissing setting
+  ╰ docs lq explain MissingTemplate
+
+error MissingTemplate
+'snippets/nothing-like-it.liquid' does
+not exist
+  ╭─ sections/main.liquid:3:11
+  │
+2 │ {% render 'nothing-like-it' %}
+3 │ {% render 'nothing-like-it' %}
+  ·           ━━━━━━━━━━━━━━━━━
+  · not found
+4 │ {% render 'card', title: 'a', subti…
+  │
+  ├ note if a build step generates this
+  │      file, list it in this check's
+  │      ignoreMissing setting
+  ╰ docs lq explain MissingTemplate
+
+warning UnrecognizedRenderSnippetArguments
+Unknown argument 'subtitel' in render
+tag for snippet 'card'.
+  ╭─ sections/main.liquid:4:31
+  │
+3 │ {% render 'nothing-like-it' %}
+4 │ …tle: 'a', subtitel: 'b' %}
+  ·            ━━━━━━━━━━━━━
+  · unknown argument
+5 │ {% render 'card' %}
+  │
+  ├ note did you mean 'subtitle'?
+  ├ note snippets/card.liquid declares
+  │      title, subtitle
+  ├ try  Remove 'subtitel'
+  │      - {% render 'card', title: 'a'…
+  │      + {% render 'card', title: 'a'…
+  ╰ docs lq explain UnrecognizedRenderSnippetArguments
+
+warning MissingRenderSnippetArguments
+Missing required argument 'title' in
+render tag for snippet 'card'.
+  ╭─ sections/main.liquid:5:11
+  │
+4 │ {% render 'card', title: 'a', subti…
+5 │ {% render 'card' %}
+  ·           ━━━━━━━
+6 │ {{ 'a' | upcas }}
+  │
+  ├ note snippets/card.liquid declares
+  │      @param {string} title: The
+  │      title
+  ├ try  Add required argument 'title'
+  │      - {% render 'card' %}
+  │      + {% render 'card', title: '' …
+  ╰ docs lq explain MissingRenderSnippetArguments
+
+error UnknownFilter
+Unknown filter 'upcas' used.
+  ╭─ sections/main.liquid:6:8
+  │
+5 │ {% render 'card' %}
+6 │ {{ 'a' | upcas }}
+  ·        ━━━━━━━
+7 │ {{ produt.title }}
+  │
+  ├ note did you mean 'upcase'?
+  ╰ docs lq explain UnknownFilter
+
+warning UndefinedObject
+Unknown object 'produt' used.
+  ╭─ sections/main.liquid:7:4
+  │
+6 │ {{ 'a' | upcas }}
+7 │ {{ produt.title }}
+  ·    ━━━━━━━━━━━━ not defined
+8 │ {{ 'greeting.helo' | t }}
+  │
+  ├ note did you mean 'product'?
+  ╰ docs lq explain UndefinedObject
+
+error TranslationKeyExists
+'greeting.helo' does not have a matching
+entry in 'locales/en.default.json'
+  ╭─ sections/main.liquid:8:4
+  │
+7 │ {{ produt.title }}
+8 │ {{ 'greeting.helo' | t }}
+  ·    ━━━━━━━━━━━━━━━ no such key
+9 │         {{ tabbed_thing }}
+  │
+  ├ note did you mean 'greeting.hello'?
+  ╰ docs lq explain TranslationKeyExists
+
+warning UndefinedObject
+Unknown object 'tabbed_thing' used.
+   ╭─ sections/main.liquid:9:6
+   │
+ 8 │ {{ 'greeting.helo' | t }}
+ 9 │         {{ tabbed_thing }}
+   ·            ━━━━━━━━━━━━ not defined
+10 │ <p>日本語のテキスト {{ wide_thing …
+   │
+   ╰ docs lq explain UndefinedObject
+
+warning UndefinedObject
+Unknown object 'wide_thing' used.
+   ╭─ sections/main.liquid:10:16
+   │
+ 9 │         {{ tabbed_thing }}
+10 │ <p>日本語のテキスト {{ wide_thing …
+   ·                        ━━━━━━━━━━
+   · not defined
+11 │ <p class="xxxxxxxxxxxxxxxxxxxxxxxx…
+   │
+   ╰ docs lq explain UndefinedObject
+
+warning UndefinedObject
+Unknown object 'long_thing' used.
+   ╭─ sections/main.liquid:11:316
+   │
+10 │ <p>日本語のテキスト {{ wide_thing …
+11 │ …xxxxxx">{{ long_thing }}</p>
+   ·             ━━━━━━━━━━ not defined
+12 │ {{ 'esc�[31mape.key' | t }}
+   │
+   ╰ docs lq explain UndefinedObject
+
+error TranslationKeyExists
+'esc�[31mape.key' does not have a
+matching entry in
+'locales/en.default.json'
+   ╭─ sections/main.liquid:12:4
+   │
+11 │ <p class="xxxxxxxxxxxxxxxxxxxxxxxx…
+12 │ {{ 'esc�[31mape.key' | t }}
+   ·    ━━━━━━━━━━━━━━━━━ no such key
+13 │ {% if a %}<div>{% endif %}
+   │
+   ╰ docs lq explain TranslationKeyExists
+
+warning UndefinedObject
+Unknown object 'a' used.
+   ╭─ sections/main.liquid:13:7
+   │
+12 │ {{ 'esc�[31mape.key' | t }}
+13 │ {% if a %}<div>{% endif %}
+   ·       ━ not defined
+14 │ {% assign unused = 1 %}
+   │
+   ╰ docs lq explain UndefinedObject
+
+warning UnclosedHTMLElement
+Opening tag does not have a matching
+closing tag for condition `a` in
+Document 'Document'
+   ╭─ sections/main.liquid:13:11
+   │
+12 │ {{ 'esc�[31mape.key' | t }}
+13 │ {% if a %}<div>{% endif %}
+   ·           ━━━━━
+   · never closed in this branch
+14 │ {% assign unused = 1 %}
+   │
+   ├ note a condition's branches have to
+   │      open and close the same tags,
+   │      or the HTML is broken when
+   │      only one of them runs
+   ╰ docs lq explain UnclosedHTMLElement
+
+warning UnusedAssign
+The variable 'unused' is assigned but
+not used
+   ╭─ sections/main.liquid:14:1
+   │
+13 │ {% if a %}<div>{% endif %}
+14 │ {% assign unused = 1 %}
+   · ━━━━━━━━━━━━━━━━━━━━━━━
+15 │ {% assign x = 'a' | img_url %}{{ x…
+   │
+   ├ try  Remove the unused variable
+   │      'unused'
+   │      - {% assign unused = 1 %}
+   ╰ docs lq explain UnusedAssign
+
+warning DeprecatedFilter
+Deprecated filter 'img_url', consider
+using 'image_url'.
+   ╭─ sections/main.liquid:15:19
+   │
+14 │ {% assign unused = 1 %}
+15 │ {% assign x = 'a' | img_url %}{{ x…
+   ·                   ━━━━━━━━━
+   │
+   ├ try  Replace 'img_url' with
+   │      'image_url'.
+   │      - {% assign x = 'a' | img_url…
+   │      + {% assign x = 'a' | image_u…
+   ╰ docs lq explain DeprecatedFilter
+
+warning OrphanedSnippet
+This snippet is not referenced by any
+other files
+  ╭─ snippets/orphan.liquid:1:1
+  │
+  ╰ docs lq explain OrphanedSnippet
+
+✖ 10 errors   ▲ 12 warnings
+
+  6 ████████████████ UndefinedObject
+  4 ███████████      MatchingTranslations
+  3 ████████         MissingTemplate
+  2 ██████           TranslationKeyExists
+  1 ███              UnknownFilter
+  1 ███              DeprecatedFilter
+  1 ███              MissingRenderSnippetArguments
+  1 ███              OrphanedSnippet
+  1 ███              UnclosedHTMLElement
+  1 ███              UnrecognizedRenderSnippetArguments
+  1 ███              UnusedAssign
+
+→ 1 offense can be fixed with lq check --auto-correct
+→ 2 offenses have a fix --auto-correct can't apply, shown as "fix"
+→ 5 offenses have a suggested change, shown as "try"
+22 offenses in 5 of 8 files checked in <time>
+failed: 10 offenses at fail level error; the other 12 don't fail this run
