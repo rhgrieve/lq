@@ -10,7 +10,9 @@ use lq_theme::config::{load_config, Config, ConfigError};
 use lq_theme::discovery::get_theme_files;
 use lq_theme::divergence::{parse_divergence_flag, Divergences};
 use rayon::prelude::*;
+use crate::report::term::{style, ColorChoice, Term};
 use crate::report::upstream::{card, grouped, render_json, render_text};
+use crate::report::{fail_threshold, rail, Report};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
@@ -21,6 +23,34 @@ const THEME_CHECK_VERSION: &str = "3.31.0";
 
 /// Worker threads parse and walk deep trees too.
 const WORKER_STACK: usize = 1 << 30;
+
+/// What `--output` selects, after the defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Format {
+    Text,
+    Upstream,
+    Json,
+}
+
+impl Format {
+    fn of(flags: &Flags) -> Format {
+        if flags.json {
+            return Format::Json;
+        }
+        match flags.output.as_deref() {
+            Some("json") => Format::Json,
+            Some("upstream") => Format::Upstream,
+            Some(_) => Format::Text,
+            None if flags.upstream_bugs => Format::Upstream,
+            None => Format::Text,
+        }
+    }
+
+    /// Whether stdout carries a report for a tool.
+    fn is_machine(self) -> bool {
+        !matches!(self, Format::Text | Format::Upstream)
+    }
+}
 
 #[derive(Default)]
 struct Flags {
@@ -36,6 +66,9 @@ struct Flags {
     version: bool,
     help: bool,
     timings: bool,
+    upstream_bugs: bool,
+    color: Option<ColorChoice>,
+    no_fold: bool,
     divergences: Divergences,
     /// Files or directories to report offenses for. The whole theme is still loaded.
     files: Vec<String>,
@@ -55,11 +88,17 @@ Options:
   -p, --path <dir>         Theme root [default: current directory]
   -C, --config <file>      Config file, or theme-check:all, :recommended, :theme-app-extension,
                            :nothing [default: .theme-check.yml in the root]
-  -o, --output <format>    text or json [default: text]
+  -o, --output <format>    text, json or upstream [default: text]
+                             text       a report for people, on stderr
+                             json       upstream's JSON, unchanged
+                             upstream   upstream's text layout, on stderr
   -j, --json               Same as --output json
+      --color <when>       auto, always or never [default: auto]. Honors NO_COLOR and FORCE_COLOR
+      --no-fold            Print every repeat of a problem in full, instead of listing its locations
       --fail-level <level> crash, error, suggestion, style, warning or info [default: error]
   -a, --auto-correct       Apply safe fixes in place
-      --upstream-bugs      Reproduce upstream exactly, bugs included: see DIVERGENCES.md
+      --upstream-bugs      Reproduce upstream exactly, bugs included: see DIVERGENCES.md. Text
+                           output uses upstream's layout too, unless --output says otherwise
       --timings            Print the time spent in each phase to stderr
       --print              Print the resolved config and exit
       --list               List the enabled checks and exit
@@ -68,8 +107,11 @@ Options:
   -h, --help               Print this help
 
 Exit code: 0 clean, 1 offenses at or above the fail level or a bad config, 2 bad usage.
-Text output goes to stderr and JSON to stdout, as upstream does.
+text and upstream go to stderr, and JSON to stdout.
+Run `lq explain <Check>` for what a check does and how to configure or disable it.
 ";
+
+const OUTPUTS: [&str; 3] = ["text", "json", "upstream"];
 
 const LEVELS: [&str; 6] = ["crash", "error", "suggestion", "style", "warning", "info"];
 
@@ -104,8 +146,8 @@ fn parse_flags(args: &[String]) -> Result<Flags, String> {
             "--config" | "-C" => f.config = Some(value(&mut i)?),
             "--output" | "-o" => {
                 let v = value(&mut i)?;
-                if v != "text" && v != "json" {
-                    return Err(format!("Expected --output={v} to be one of: text, json"));
+                if !OUTPUTS.contains(&v.as_str()) {
+                    return Err(format!("Expected --output={v} to be one of: {}", OUTPUTS.join(", ")));
                 }
                 f.output = Some(v);
             }
@@ -124,7 +166,19 @@ fn parse_flags(args: &[String]) -> Result<Flags, String> {
             "--version" | "-v" => f.version = true,
             "--help" | "-h" => f.help = true,
             "--timings" => f.timings = true,
-            "--upstream-bugs" => f.divergences = Divergences::NONE,
+            "--upstream-bugs" => {
+                f.upstream_bugs = true;
+                f.divergences = Divergences::NONE;
+            }
+            "--no-fold" => f.no_fold = true,
+            "--color" => {
+                f.color = Some(match value(&mut i)?.as_str() {
+                    "auto" => ColorChoice::Auto,
+                    "always" => ColorChoice::Always,
+                    "never" => ColorChoice::Never,
+                    v => return Err(format!("Expected --color={v} to be one of: auto, always, never")),
+                });
+            }
             "--only-divergence" => {
                 let v = value(&mut i)?;
                 match parse_divergence_flag(name, Some(&v)) {
@@ -137,16 +191,6 @@ fn parse_flags(args: &[String]) -> Result<Flags, String> {
         }
     }
     Ok(f)
-}
-
-/// `Ae(failLevel)`: the severity at or below which the run fails.
-fn fail_threshold(level: &str) -> Option<Severity> {
-    match level {
-        "error" => Some(Severity::Error),
-        "suggestion" | "warning" => Some(Severity::Warning),
-        "style" | "info" => Some(Severity::Info),
-        _ => None,
-    }
 }
 
 fn absolute(p: &str) -> String {
@@ -291,7 +335,8 @@ pub fn check(args: &[String]) -> i32 {
         print!("{CHECK_HELP}");
         return 0;
     }
-    let json = flags.json || flags.output.as_deref() == Some("json");
+    let format = Format::of(&flags);
+    let json = format.is_machine();
     if json {
         let conflict = [(flags.init, "init"), (flags.version, "version"), (flags.print, "print"), (flags.list, "list")]
             .into_iter()
@@ -322,13 +367,19 @@ pub fn check(args: &[String]) -> i32 {
             list_checks(&load(config_path.as_deref(), &root)?);
             return Ok(0);
         }
-        run_check(&flags, json, &root, config_path.as_deref())
+        run_check(&flags, format, &root, config_path.as_deref())
     })();
     match result {
         Ok(code) => code,
         Err(e) => {
-            if json {
+            if format == Format::Json {
                 println!("{{\"error\":{{\"type\":\"abort\",\"message\":{}}}}}", quote(&e.message));
+            } else if format != Format::Upstream {
+                let term = Term::detect(flags.color.unwrap_or(ColorChoice::Auto));
+                eprintln!("{} {}", term.paint(style::ERROR, "error"), crate::report::sanitize(&e.message));
+                if let Some(next) = e.next_steps {
+                    eprintln!("{next}");
+                }
             } else {
                 let mut sections = vec![e.message.clone()];
                 if let Some(next) = e.next_steps {
@@ -341,7 +392,7 @@ pub fn check(args: &[String]) -> i32 {
     }
 }
 
-fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -> Result<i32, CliError> {
+fn run_check(flags: &Flags, format: Format, root: &str, config_path: Option<&str>) -> Result<i32, CliError> {
     let timing = flags.timings || std::env::var_os("LQ_TIMING").is_some();
     let t0 = Instant::now();
     let selection = Selection::new(&flags.files, root);
@@ -353,6 +404,7 @@ fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -
     }
     let mut config = load(config_path, root)?;
     config.divergences = flags.divergences;
+    config.hints = format == Format::Text;
     if let Some(e) = config.ignore_type_error() {
         return Err(CliError { message: e.message, next_steps: None });
     }
@@ -397,17 +449,40 @@ fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -
         let threshold = flags.fail_level.as_deref().map_or(Some(Severity::Error), fail_threshold);
         let valid = !threshold.is_some_and(|r| output.offenses.iter().any(|o| o.severity <= r));
         let groups = grouped(&output.offenses);
-        if !json {
+        if format == Format::Upstream {
             eprint!("{}", render_text(root, &groups, &sources, inspected, output.offenses.len()));
         }
-        if flags.auto_correct {
+        let applied = if flags.auto_correct {
             let keep_going = config.divergences.contains(lq_check::Divergence::AutofixAbort);
-            apply_autofix(&sources, &output.offenses, keep_going).map_err(|message| CliError { message, next_steps: None })?;
+            Some(apply_autofix(&sources, &output.offenses, keep_going).map_err(|message| CliError { message, next_steps: None }))
+        } else {
+            None
+        };
+        // lq's own reports come after the fixes, so that they can say what they did, and the text
+        // one even when a fix failed.
+        let mut stdout_text = None;
+        if !matches!(format, Format::Upstream | Format::Json) {
+            let mut report = Report::new(root, &output.offenses, &sources);
+            report.inspected = inspected;
+            report.valid = valid;
+            report.fail_level = flags.fail_level.as_deref().unwrap_or("error");
+            report.fold = !flags.no_fold;
+            report.applied = applied.as_ref().and_then(|a| a.as_ref().ok().copied());
+            report.check_fixes();
+            report.elapsed = t0.elapsed();
+            let term = Term::detect(flags.color.unwrap_or(ColorChoice::Auto));
+            eprint!("{}", rail::render(&report, &term));
         }
-        if json {
+        if let Some(Err(e)) = applied {
+            return Err(e);
+        }
+        if format == Format::Json {
+            stdout_text = Some(format!("{}\n", render_json(valid, &groups)));
+        }
+        if let Some(text) = stdout_text {
             let stdout = std::io::stdout();
             let mut lock = stdout.lock();
-            let _ = writeln!(lock, "{}", render_json(valid, &groups));
+            let _ = lock.write_all(text.as_bytes());
             let _ = lock.flush();
         }
         let t_output = t.elapsed();
@@ -503,7 +578,10 @@ fn hidden_note((errors, files): (usize, usize)) -> Option<String> {
 
 /// `autofix(theme, offenses)`. Upstream stops at the first file whose fix can't be applied;
 /// with `keep_going` that file is skipped with a warning and the rest are still fixed.
-fn apply_autofix(sources: &[(String, String)], offenses: &[Offense], keep_going: bool) -> Result<(), String> {
+///
+/// Returns the fixes applied and the files they changed.
+fn apply_autofix(sources: &[(String, String)], offenses: &[Offense], keep_going: bool) -> Result<(usize, usize), String> {
+    let (mut applied, mut files) = (0, 0);
     for (u, source) in sources {
         let fixes: Vec<_> = offenses.iter().filter(|o| o.uri == *u).filter_map(|o| o.fix.as_ref()).collect();
         if fixes.is_empty() {
@@ -518,8 +596,10 @@ fn apply_autofix(sources: &[(String, String)], offenses: &[Offense], keep_going:
             Err(message) => return Err(message),
         };
         std::fs::write(uri::fs_path(u), fixed).map_err(|e| e.to_string())?;
+        applied += fixes.len();
+        files += 1;
     }
-    Ok(())
+    Ok((applied, files))
 }
 
 // ---- debug ----------------------------------------------------------------------
