@@ -58,6 +58,7 @@ divergences! {
     CdnPreconnectHost: "CdnPreconnect", "Compares the URL's hostname instead of an unanchored, unescaped pattern.";
     RouteBoundary: "HardcodedRoutes", "A route matches only up to a segment boundary, `?` or `#`.";
     ImgUrlPrototype: "DeprecatedFilter", "An `img_url` size named like an `Object.prototype` member isn't a named size.";
+    UnclosedTagHint: "LiquidHTMLSyntaxError", "A parse error caused by an unclosed tag points at that tag, not at the later markup that failed.";
     AutofixAbort: "engine", "A JSON file that `--auto-correct` can't rewrite, such as a locale with a comment header, is skipped with a warning instead of aborting every other fix.";
 }
 

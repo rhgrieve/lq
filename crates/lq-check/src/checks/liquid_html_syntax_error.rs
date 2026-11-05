@@ -8,7 +8,10 @@ use crate::api::*;
 use crate::check_utils::{is_loop_tag, is_within_unparsed_raw_tag};
 use lq_json::regex::JsRegex;
 use lq_syntax::js::{slice, trim, trim_end};
-use lq_syntax::{LiquidTag, LiquidVariable, Markup, Node, ParseError, PARSING_ERROR_NAME};
+use lq_syntax::{
+    tokenize, LiquidTag, LiquidVariable, Markup, Node, ParseError, Token as DocToken, TokenType as DocTokenType, TokenizeOptions,
+    PARSING_ERROR_NAME,
+};
 use std::sync::OnceLock;
 
 pub const IMPL: CheckImpl = CheckImpl::Liquid {
@@ -124,7 +127,95 @@ fn report_parse_error<'a>(error: &ParseError, cx: &LiquidCx<'a, '_>) {
         end = next_utf16_unit(source, end);
     }
     let highlight = lossy_slice(source, start, end);
-    cx.report(LiquidProblem::new(clean_error_message(&error.message, &highlight), start, end));
+    let message = clean_error_message(&error.message, &highlight);
+    if cx.divergence(Divergence::UnclosedTagHint) {
+        if let Some(tag) = find_unclosed_tag(source, start) {
+            let line = source.as_bytes()[..tag.close_start as usize].iter().filter(|b| **b == b'\n').count() + 1;
+            let hint = format!(
+                "This tag isn't closed, so it runs on to the `{}` on line {line}. That caused: {message}",
+                tag.close
+            );
+            cx.report(LiquidProblem::new(hint, tag.start, tag.first_line_end));
+            return;
+        }
+    }
+    cx.report(LiquidProblem::new(message, start, end));
+}
+
+struct UnclosedTag {
+    start: u32,
+    first_line_end: u32,
+    close: &'static str,
+    close_start: u32,
+}
+
+/// The last Liquid tag or output before `before` whose markup contains another opener
+/// outside quotes. A missing `%}` makes the tokenizer run on to the next tag's close, so
+/// that is where the real mistake is, not the later markup the parser fails on.
+fn find_unclosed_tag(source: &str, before: u32) -> Option<UnclosedTag> {
+    let tokens = tokenize(source, TokenizeOptions::default());
+    let text = |t: &DocToken| &source[t.start as usize..t.end as usize];
+    let mut found = None;
+    let mut i = 0;
+    while i + 2 < tokens.len() {
+        let (open, body, close) = (&tokens[i], &tokens[i + 1], &tokens[i + 2]);
+        let (is_tag, close_text) = match open.token_type {
+            DocTokenType::LiquidTagOpen => (true, "%}"),
+            DocTokenType::LiquidVariableOutputOpen => (false, "}}"),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        if open.start >= before {
+            break;
+        }
+        if body.token_type != DocTokenType::Text {
+            i += 1;
+            continue;
+        }
+        let markup = trim(text(body));
+        // Bodies of these tags are free text, where a stray opener isn't a mistake.
+        if is_tag {
+            let name = markup.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap_or("");
+            if matches!(name, "comment" | "raw" | "doc" | "schema") {
+                let end = format!("end{name}");
+                i += 3;
+                while i + 1 < tokens.len()
+                    && !(tokens[i].token_type == DocTokenType::LiquidTagOpen && trim(text(&tokens[i + 1])) == end)
+                {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        if has_opener_outside_quotes(markup) {
+            let line = source[open.start as usize..].find('\n').map_or(source.len(), |n| open.start as usize + n);
+            found = Some(UnclosedTag {
+                start: open.start,
+                first_line_end: open.start + trim_end(&source[open.start as usize..line]).len() as u32,
+                close: close_text,
+                close_start: close.start,
+            });
+        }
+        i += 3;
+    }
+    found
+}
+
+fn has_opener_outside_quotes(markup: &str) -> bool {
+    let bytes = markup.as_bytes();
+    let mut quote = None;
+    for (i, b) in bytes.iter().enumerate() {
+        match quote {
+            Some(q) if q == *b => quote = None,
+            Some(_) => {}
+            None if matches!(b, b'"' | b'\'') => quote = Some(*b),
+            None if *b == b'{' && matches!(bytes.get(i + 1), Some(b'%' | b'{')) => return true,
+            None => {}
+        }
+    }
+    false
 }
 
 /// `getOffset(source, line, column)`, 1-origin with columns in UTF-16 units, as a byte

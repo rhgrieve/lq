@@ -609,6 +609,13 @@ pub fn check(args: &[String]) -> i32 {
 fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -> Result<i32, CliError> {
     let timing = flags.timings || std::env::var_os("LQ_TIMING").is_some();
     let t0 = Instant::now();
+    let selection = Selection::new(&flags.files, root);
+    if !selection.missing.is_empty() {
+        for path in &selection.missing {
+            eprintln!("[lq] error: {path} doesn't exist, in this directory or in the theme");
+        }
+        return Ok(2);
+    }
     let mut config = load(config_path, root)?;
     config.divergences = flags.divergences;
     if let Some(e) = config.ignore_type_error() {
@@ -644,7 +651,7 @@ fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -
         let deps = NodeDependencies::new(&theme, &config, root);
         let mut output = lq_check::check(&theme, &config, &deps);
         let t_checks = t.elapsed();
-        let selection = Selection::new(&flags.files, root);
+        let hidden = hidden_errors(&output.offenses, &selection);
         output.offenses.retain(|o| selection.contains(&uri::fs_path(&o.uri)));
         let inspected = sources.iter().filter(|(u, _)| selection.contains(&uri::fs_path(u))).count();
         if let Some(reason) = deps.graph_failure().filter(|_| config.divergences.contains(lq_check::Divergence::GraphFailure)) {
@@ -669,6 +676,10 @@ fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -
             let _ = lock.flush();
         }
         let t_output = t.elapsed();
+
+        if let Some(note) = hidden_note(hidden) {
+            eprintln!("{note}");
+        }
 
         let missing: Vec<&str> = config
             .checks
@@ -704,17 +715,19 @@ fn run_check(flags: &Flags, json: bool, root: &str, config_path: Option<&str>) -
 struct Selection {
     files: Vec<String>,
     dirs: Vec<String>,
+    /// Arguments that don't exist. Checking nothing must not look like a pass.
+    missing: Vec<String>,
     all: bool,
 }
 
 impl Selection {
     fn new(args: &[String], root: &str) -> Selection {
-        let mut s = Selection { files: Vec::new(), dirs: Vec::new(), all: args.is_empty() };
+        let mut s = Selection { files: Vec::new(), dirs: Vec::new(), missing: Vec::new(), all: args.is_empty() };
         for arg in args {
             let from_cwd = uri::posix_normalize(&absolute(arg));
             let from_root = uri::posix_normalize(&Path::new(root).join(arg).to_string_lossy());
             let Some(path) = [from_cwd, from_root].into_iter().find(|p| Path::new(p).exists()) else {
-                eprintln!("[lq] warning: {arg} doesn't exist, skipping it");
+                s.missing.push(arg.clone());
                 continue;
             };
             if Path::new(&path).is_dir() {
@@ -729,6 +742,28 @@ impl Selection {
     fn contains(&self, path: &str) -> bool {
         self.all || self.files.iter().any(|f| f == path) || self.dirs.iter().any(|d| path.starts_with(d))
     }
+}
+
+/// Errors, and the files they're in, that the file arguments leave out of the report.
+fn hidden_errors(offenses: &[Offense], selection: &Selection) -> (usize, usize) {
+    let hidden: Vec<&Offense> = offenses
+        .iter()
+        .filter(|o| o.severity == Severity::Error && !selection.contains(&uri::fs_path(&o.uri)))
+        .collect();
+    let files: std::collections::HashSet<&str> = hidden.iter().map(|o| o.uri.as_str()).collect();
+    (hidden.len(), files.len())
+}
+
+/// The whole theme is always linted, so a clean report on named files shouldn't read as a clean theme.
+fn hidden_note((errors, files): (usize, usize)) -> Option<String> {
+    if errors == 0 {
+        return None;
+    }
+    let errors_word = if errors == 1 { "error" } else { "errors" };
+    let files_word = if files == 1 { "file" } else { "files" };
+    Some(format!(
+        "[lq] note: {errors} {errors_word} in {files} other {files_word} not shown, because only the named files are reported. Run `lq check` with no file arguments to see them."
+    ))
 }
 
 /// `autofix(theme, offenses)`. Upstream stops at the first file whose fix can't be applied;

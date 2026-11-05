@@ -30,7 +30,7 @@ Each release attaches an npm tarball with binaries for macOS and Linux, on arm64
 ```json
 {
   "devDependencies": {
-    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.1.0/lq-theme-check-0.1.0.tgz"
+    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.1.1/lq-theme-check-0.1.1.tgz"
   }
 }
 ```
@@ -71,10 +71,9 @@ lq fmt --stdin-filepath a.liquid      # stdin to stdout, using the config for th
 `lq --help`, `lq check --help` and `lq fmt --help` list everything. `lq check` accepts upstream's offline flags and
 prints upstream's layout: text on stderr, JSON on stdout. `lq fmt` behaves like `prettier` for Liquid files.
 
-File arguments to `lq check` narrow what is *reported*, and what decides the exit code. The whole theme is still
+File arguments to `lq check` narrow what is *reported*, and what decides the exit code. If other files have errors, a note on stderr says how many. The whole theme is still
 loaded, so cross-file checks stay correct: a file's offenses are the same either way. Paths may be relative to the
-current directory or to the theme root, a directory selects everything under it, and a path that doesn't exist is
-skipped with a warning.
+current directory or to the theme root, a directory selects everything under it, and a path that doesn't exist exits 2.
 
 ### lefthook
 
@@ -188,6 +187,8 @@ counts and exit codes.
   that Prettier accepts, and `--write` would then reformat it: on Horizon, `lq` flags the 28 files Prettier flags plus
   14 more.
 - **Markdown blocks** pass through verbatim.
+- **`lq fmt` doesn't report syntax errors,** as with Prettier: it reformats a file with a broken tag, which can rearrange the code around it. In a hook, run `lq check` before `lq fmt --write`.
+- **Extreme nesting is slow.** A file with 100,000 nested `{% if %}`s takes about 56s to lint, because checks read a node's ancestors. Real themes aren't close to this: 6,960 ordinary files take 0.5s.
 - **Parser disagreements** on code outside the corpus: where Biome rejects what Prettier's parsers accept, such as
   top-level `return`, `|>`, `//` in CSS, or `{{ }}` in CSS `url()`, the block prints verbatim.
 - **JS, TS and TOML Prettier configs** are unsupported, and reported as errors.
@@ -201,7 +202,7 @@ counts and exit codes.
 
 ## Divergences
 
-Upstream has bugs, and `lq` fixes the ones with a demonstrated reproduction. 20 are listed in
+Upstream has bugs, and `lq` fixes the ones with a demonstrated reproduction. 21 are listed in
 [DIVERGENCES.md](DIVERGENCES.md), each with its reproduction and a test against the real upstream. `lq check
 --upstream-bugs` reproduces upstream for all but one: a string `$schema` crashes upstream's whole process, which isn't
 worth reproducing.
