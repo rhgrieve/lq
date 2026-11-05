@@ -2,6 +2,7 @@ use lq_syntax::{dump, SourceMap};
 use std::io::Write;
 
 mod check_cmd;
+mod report;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
