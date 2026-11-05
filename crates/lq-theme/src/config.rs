@@ -148,6 +148,9 @@ pub struct Config {
     pub require: Vec<String>,
     /// Which fixes for upstream bugs are on. `--upstream-bugs` empties it.
     pub divergences: crate::divergence::Divergences,
+    /// Whether checks work out hints for the reader. Off unless the report can show them,
+    /// because they can search a whole locale for each offense.
+    pub hints: bool,
     ignore_values: Option<Vec<Value>>,
     global_matchers: OnceLock<Vec<Minimatch>>,
     check_matchers: OnceLock<HashMap<String, Vec<Minimatch>>>,
@@ -175,6 +178,7 @@ impl Config {
             ignore,
             require: Vec::new(),
             divergences: crate::divergence::Divergences::ALL,
+            hints: false,
             ignore_values,
             global_matchers: OnceLock::new(),
             check_matchers: OnceLock::new(),

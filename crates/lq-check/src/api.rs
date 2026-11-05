@@ -236,6 +236,7 @@ pub struct Problem<C> {
     pub end: u32,
     pub fix: Option<Fix>,
     pub suggest: Option<Vec<Suggestion>>,
+    pub hints: Hints,
     _corrector: PhantomData<C>,
 }
 
@@ -243,6 +244,31 @@ pub struct Problem<C> {
 pub type LiquidProblem = Problem<StringCorrector>;
 /// A problem in a JSON file.
 pub type JsonProblem = Problem<JsonCorrector>;
+
+/// Help for the person reading a report. `lq`'s own, not upstream's: it never changes which
+/// offenses exist or their messages, positions and fixes, and `--output json` leaves it out.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Hints {
+    /// The short text beside the underline.
+    pub label: Option<String>,
+    pub notes: Vec<Note>,
+    /// The problem is with the file as a whole, whatever its span says.
+    pub file_level: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Note {
+    pub message: String,
+    /// Where it points, when that's somewhere else: a file and a byte range in it.
+    pub related: Option<Related>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Related {
+    pub uri: String,
+    pub start: u32,
+    pub end: u32,
+}
 
 /// A fix that can't be applied automatically; `fix` is data, already collected.
 #[derive(Clone, Debug, PartialEq)]
@@ -253,7 +279,7 @@ pub struct Suggestion {
 
 impl<C: Corrector> Problem<C> {
     pub fn new(message: impl Into<String>, start: u32, end: u32) -> Self {
-        Problem { message: message.into(), start, end, fix: None, suggest: None, _corrector: PhantomData }
+        Problem { message: message.into(), start, end, fix: None, suggest: None, hints: Hints::default(), _corrector: PhantomData }
     }
 
     /// `problem.fix`: a safe autofix. The closure runs now and records the changes.
@@ -271,6 +297,48 @@ impl<C: Corrector> Problem<C> {
         self.suggest
             .get_or_insert_with(Vec::new)
             .push(Suggestion { message: message.into(), fix: c.into_fix() });
+        self
+    }
+
+    /// Adds hints only when the report can show them. See [`Cx::wants_hints`].
+    pub fn hints_if(self, wanted: bool, add: impl FnOnce(Self) -> Self) -> Self {
+        if wanted {
+            add(self)
+        } else {
+            self
+        }
+    }
+
+    /// The problem is with the file as a whole, so there's nothing in it to point at.
+    pub fn file_level(mut self) -> Self {
+        self.hints.file_level = true;
+        self
+    }
+
+    /// The short text beside the underline.
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.hints.label = Some(text.into());
+        self
+    }
+
+    /// A line of help for the reader.
+    pub fn note(mut self, text: impl Into<String>) -> Self {
+        self.hints.notes.push(Note { message: text.into(), related: None });
+        self
+    }
+
+    /// A line of help, if there is one.
+    pub fn note_opt(self, text: Option<String>) -> Self {
+        match text {
+            Some(text) => self.note(text),
+            None => self,
+        }
+    }
+
+    /// A line of help that points at a byte range of another file.
+    pub fn note_at(mut self, text: impl Into<String>, uri: impl Into<String>, start: u32, end: u32) -> Self {
+        let related = Some(Related { uri: uri.into(), start, end });
+        self.hints.notes.push(Note { message: text.into(), related });
         self
     }
 
@@ -330,7 +398,7 @@ pub type JsonCx<'a, 'f> = Cx<'a, 'f, JsonCorrector>;
 impl<'a, 'f, C: Corrector> Cx<'a, 'f, C> {
     /// `context.report(problem)`.
     pub fn report(&self, problem: Problem<C>) {
-        self.state.report(self.def, self.index, self.severity, self.file, problem.message, problem.start, problem.end, problem.fix, problem.suggest);
+        self.state.report(self.def, self.index, self.severity, self.file, problem.message, problem.start, problem.end, problem.fix, problem.suggest, problem.hints);
     }
 }
 
@@ -339,6 +407,12 @@ impl<'a, 'f, C> Cx<'a, 'f, C> {
     #[inline]
     pub fn divergence(&self, d: Divergence) -> bool {
         self.run.config.divergences.contains(d)
+    }
+
+    /// Whether the report can show hints: when false, don't spend time working them out.
+    #[inline]
+    pub fn wants_hints(&self) -> bool {
+        self.run.config.hints
     }
 
     /// `context.file`.

@@ -45,6 +45,7 @@ pub struct Offense {
     pub end_byte: u32,
     pub fix: Option<Fix>,
     pub suggest: Option<Vec<Suggestion>>,
+    pub hints: Hints,
     pub(crate) tick: u32,
     pub(crate) check_index: u16,
     pub(crate) file_index: u32,
@@ -217,6 +218,7 @@ impl<'a> FileState<'a> {
         end: u32,
         fix: Option<Fix>,
         suggest: Option<Vec<Suggestion>>,
+        hints: Hints,
     ) {
         let start_pos = self.position(file.source, start);
         let end_pos = self.position(file.source, end);
@@ -232,6 +234,7 @@ impl<'a> FileState<'a> {
             end_byte: end,
             fix,
             suggest,
+            hints,
             tick: self.tick.get(),
             check_index: index,
             file_index: self.file_index,
