@@ -639,8 +639,9 @@ mod tests {
     fn deep_documents_on_a_small_stack() {
         let doc = format!("{}{}", "[".repeat(2000), "]".repeat(2000));
         let v = validator(&[("a.json", r##"{"items":{"$ref":"#"}}"##, &["*.json"])]);
+        // Unoptimized frames take over 128 KB before the first hop, and more on x64 Windows.
         std::thread::Builder::new()
-            .stack_size(256 << 10)
+            .stack_size(1 << 20)
             .spawn(move || {
                 assert!(v.validate("file:///x.json", &doc).unwrap().is_empty());
                 let too_deep = "[".repeat(100_000);
