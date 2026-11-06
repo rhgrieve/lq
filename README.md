@@ -74,9 +74,12 @@ lq check --timings                    # time per phase, on stderr
 lq fmt "**/*.liquid" --check          # exit 1 if a file would change
 lq fmt "**/*.liquid" --write          # rewrite files in place
 lq fmt --stdin-filepath a.liquid      # stdin to stdout, using the config for that path
+
+lq all                                # lq check, then lq fmt --check; see "Running both"
+lq all --write                        # apply safe fixes, then format
 ```
 
-`lq --help`, `lq check --help` and `lq fmt --help` list everything. `lq check` accepts upstream's offline flags. Its
+`lq --help`, `lq check --help`, `lq fmt --help` and `lq all --help` list everything. `lq check` accepts upstream's offline flags. Its
 JSON is upstream's, byte for byte. Its text report is its own: see [Reports](#reports). `lq fmt` behaves like `prettier`
 for Liquid files.
 
@@ -104,6 +107,29 @@ matches no check exits 2 and suggests the closest one, so a typo can't pass as a
 
 A full name or alias selects just that check, so `ValidSchema` leaves out `ValidSchemaName`.
 
+### Running both
+
+```sh
+lq all                         # lq check, then lq fmt --check on every .liquid file
+lq all --write                 # lq check --auto-correct, then lq fmt --write
+lq all snippets/a.liquid       # both, on these files or directories
+lq all --output json           # check's JSON on stdout; fmt's output stays on stderr
+```
+
+Check runs first, because a fix can leave code that needs formatting. Both run even if check finds offenses, so one run
+reports everything. The exit code is the higher of the two. If check exits 2, for bad usage or a path that doesn't exist,
+fmt doesn't run.
+
+`--write` is `lq all`'s only flag of its own. Every other `lq check` option works and applies to check only, except
+`--path`, which also sets the directory fmt works in. `--auto-correct`, `--init`, `--list`, `--print` and `--version`
+exit 2.
+
+The two commands still decide separately what they cover. `ignore:` in `.theme-check.yml` doesn't affect fmt, and
+`.prettierignore` doesn't affect check. `--only`, `--skip` and `--severity` don't narrow fmt. With no file arguments, fmt
+covers every `.liquid` file under the theme root, while check covers the theme's own directories. File arguments can't be
+globs, and fmt skips any that aren't Liquid. `--output github` has no annotations for unformatted files: they appear as
+`[warn]` lines in the log and fail the step. For fmt's own options, run `lq fmt`.
+
 ### lefthook
 
 ```yaml
@@ -121,6 +147,17 @@ pre-commit:
 
 Without a `glob`, add `--ignore-unknown` to `lq fmt`, so that other files are skipped rather than errors, as with
 Prettier. `lq check` ignores files that aren't in the theme.
+
+As one command, which also applies `lq check`'s safe fixes:
+
+```yaml
+pre-commit:
+  commands:
+    lq:
+      glob: "*.{liquid,json}"
+      run: lq all --write {staged_files}
+      stage_fixed: true
+```
 
 ### Reports
 
@@ -160,11 +197,14 @@ or the terminal. Text from theme files can't send escape sequences to your termi
 - run: npx lq fmt "**/*.liquid" --check
 ```
 
+Or, as one step, `npx lq all --output github`.
+
 GitHub limits how many annotations it displays per step, so on a theme with many offenses keep the full report as well,
 with `--output json` or `--output json-rich`.
 
 Exit codes: `lq check` gives 0 when clean, 1 for offenses at or above the fail level or a bad config, and 2 for bad
-usage. `lq fmt` gives 0 when clean, 1 when `--check` or `--list-different` found differences, and 2 for errors.
+usage. `lq fmt` gives 0 when clean, 1 when `--check` or `--list-different` found differences, and 2 for errors. `lq all`
+gives the higher of the two.
 
 ### Config files
 

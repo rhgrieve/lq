@@ -116,6 +116,7 @@ jobs:
           npx lq fmt --stdin-filepath snippets/a.liquid < snippets/a.liquid > out.liquid
           cmp out.liquid expected.liquid
           npx lq check --output json > /dev/null || [ $? -eq 1 ]
+          npx lq all --output json > /dev/null || [ $? -eq 1 ]
 
   release:
     needs: [pack, test]

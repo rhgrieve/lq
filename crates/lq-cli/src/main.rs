@@ -1,6 +1,7 @@
 use lq_syntax::{dump, SourceMap};
 use std::io::Write;
 
+mod all_cmd;
 mod check_cmd;
 mod explain;
 mod filter;
@@ -21,7 +22,8 @@ Usage: lq <command> [options]
 Commands:
   check [files...]   Lint a theme. See `lq check --help`.
   fmt [paths...]     Format Liquid files. See `lq fmt --help`.
-  explain <check>    What a check does, and how to configure or disable it.
+  all [files...]     Run check, then fmt. See `lq all --help`.
+  explain <check>   What a check does, and how to configure or disable it.
 
 Options:
   -h, --help         Print this help
@@ -32,6 +34,7 @@ lq never uses the network.
 
 const USAGE: &str = "usage: lq check [options] [files...]   (lq check --help)
        lq fmt [options] [paths...]    (lq fmt --help)
+       lq all [options] [files...]    (lq all --help)
        lq explain <check>
 debug: lq debug-check-golden <file> [--show <n>] [--upstream-bugs]
        lq debug-checks
@@ -57,6 +60,7 @@ fn run(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("check") => check_cmd::check(&args[1..]),
         Some("fmt") => lq_fmt::cli::fmt_main(&args[1..]),
+        Some("all") => all_cmd::all(&args[1..]),
         Some("explain") => explain::explain(&args[1..]),
         Some("--help" | "-h" | "help") => {
             print!("{HELP}");

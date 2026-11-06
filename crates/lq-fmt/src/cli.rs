@@ -24,6 +24,9 @@ pub struct FmtArgs {
     pub no_editorconfig: bool,
     pub ignore_unknown: bool,
     pub timings: bool,
+    /// Running under `lq all`, whose stdout belongs to `lq check`: what would go to stdout goes to
+    /// stderr, and files that didn't change aren't listed. No `lq fmt` flag sets this.
+    pub embedded: bool,
 }
 
 impl FmtArgs {
@@ -241,19 +244,23 @@ fn first_line_error(display: &str, e: &FormatError) -> String {
 
 /// The `prettier` CLI's `main`. Returns the process exit code.
 pub fn run_fmt(args: &FmtArgs) -> i32 {
-    let cwd = match std::env::current_dir() {
-        Ok(c) => c,
+    match std::env::current_dir() {
+        Ok(cwd) => run_fmt_in(&cwd, args),
         Err(e) => {
             eprintln!("[error] {e}");
-            return 2;
+            2
         }
-    };
+    }
+}
+
+/// [`run_fmt`], with paths, ignore files and reported names relative to `cwd`.
+pub fn run_fmt_in(cwd: &Path, args: &FmtArgs) -> i32 {
     let ignore_paths = if args.ignore_path.is_empty() {
         vec![PathBuf::from(".gitignore"), PathBuf::from(".prettierignore")]
     } else {
         args.ignore_path.clone()
     };
-    let ignorer = match Ignorer::load(&cwd, &ignore_paths, args.with_node_modules) {
+    let ignorer = match Ignorer::load(cwd, &ignore_paths, args.with_node_modules) {
         Ok(i) => i,
         Err(e) => {
             eprintln!("[error] {e}");
@@ -265,16 +272,18 @@ pub fn run_fmt(args: &FmtArgs) -> i32 {
     search.use_editorconfig = !args.no_editorconfig;
 
     if args.paths.is_empty() {
-        return run_stdin(args, &cwd, &ignorer, &search);
+        return run_stdin(args, cwd, &ignorer, &search);
     }
 
+    let mut stdout: Box<dyn Write> =
+        if args.embedded { Box::new(std::io::stderr()) } else { Box::new(std::io::stdout().lock()) };
     if args.check {
-        println!("Checking formatting...");
+        let _ = writeln!(stdout, "Checking formatting...");
     }
 
     let t0 = std::time::Instant::now();
     let mut errors = Vec::new();
-    let expanded = expand_patterns(&cwd, args, &mut errors);
+    let expanded = expand_patterns(cwd, args, &mut errors);
     let t_discovery = t0.elapsed();
     let mut exit_code = 0;
     for e in &errors {
@@ -290,7 +299,7 @@ pub fn run_fmt(args: &FmtArgs) -> i32 {
         expanded
             .par_iter()
             .map(|e| {
-                let display = pathdiff(&e.file, &cwd);
+                let display = pathdiff(&e.file, cwd);
                 if ignorer.is_ignored(&e.file) && (args.check || args.write || args.list_different) {
                     return FileResult::Skipped;
                 }
@@ -340,12 +349,10 @@ pub fn run_fmt(args: &FmtArgs) -> i32 {
     }
 
     let quiet = args.check || args.list_different;
-    let stdout = std::io::stdout();
-    let mut stdout = stdout.lock();
     let mut unformatted = 0;
     let mut with_error = 0;
     for (e, result) in expanded.iter().zip(results) {
-        let display = pathdiff(&e.file, &cwd);
+        let display = pathdiff(&e.file, cwd);
         match result {
             FileResult::Skipped => {}
             FileResult::Failed(message) => {
@@ -355,7 +362,9 @@ pub fn run_fmt(args: &FmtArgs) -> i32 {
             }
             FileResult::Unchanged(ms) => {
                 if args.write && !quiet {
-                    let _ = writeln!(stdout, "{display} {ms}ms (unchanged)");
+                    if !args.embedded {
+                        let _ = writeln!(stdout, "{display} {ms}ms (unchanged)");
+                    }
                 } else if !args.write && !quiet {
                     if let Ok(b) = std::fs::read(&e.file) {
                         let _ = stdout.write_all(&b);

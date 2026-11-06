@@ -16,6 +16,7 @@ use crate::report::upstream::{card, grouped, render_json, render_text};
 use crate::report::{fail_threshold, machine, rail, Report};
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::time::Instant;
 
@@ -60,7 +61,7 @@ impl Format {
 }
 
 #[derive(Default)]
-struct Flags {
+pub(crate) struct Flags {
     path: Option<String>,
     config: Option<String>,
     output: Option<String>,
@@ -82,6 +83,12 @@ struct Flags {
     only: Vec<String>,
     skip: Vec<String>,
     severity: Option<Severity>,
+}
+
+impl Flags {
+    pub(crate) fn timings(&self) -> bool {
+        self.timings
+    }
 }
 
 pub const CHECK_HELP: &str = "\
@@ -152,7 +159,7 @@ fn push_selectors(into: &mut Vec<String>, name: &str, value: &str) -> Result<(),
     Ok(())
 }
 
-fn parse_flags(args: &[String]) -> Result<Flags, String> {
+pub(crate) fn parse_flags(args: &[String]) -> Result<Flags, String> {
     let mut f = Flags::default();
     let mut i = 0;
     while i < args.len() {
@@ -373,6 +380,19 @@ fn init(root: &str) -> Result<i32, CliError> {
 // ---- the command ---------------------------------------------------------------
 
 /// `lq check`. Exits the process itself, so ASTs are never dropped.
+/// The absolute theme root that `--path` selects.
+pub(crate) fn theme_root(flags: &Flags) -> String {
+    let root = absolute(flags.path.as_deref().unwrap_or("."));
+    let root = root.strip_suffix('/').filter(|r| !r.is_empty()).map_or(root.clone(), String::from);
+    uri::posix_normalize(&root)
+}
+
+/// The absolute paths of the file arguments. Empty when there are none, and arguments that don't
+/// exist are left out: `check` has already refused those.
+pub(crate) fn selected_paths(flags: &Flags, root: &str) -> Vec<String> {
+    Selection::new(&flags.files, root).resolved()
+}
+
 pub fn check(args: &[String]) -> i32 {
     let flags = match parse_flags(args) {
         Ok(f) => f,
@@ -407,9 +427,7 @@ pub fn check(args: &[String]) -> i32 {
             return 2;
         }
     }
-    let root = absolute(flags.path.as_deref().unwrap_or("."));
-    let root = root.strip_suffix('/').filter(|r| !r.is_empty()).map_or(root.clone(), String::from);
-    let root = uri::posix_normalize(&root);
+    let root = theme_root(&flags);
     let config_path = resolve_config_flag(flags.config.as_deref());
 
     let result = (|| -> Result<i32, CliError> {
@@ -482,22 +500,26 @@ fn run_check(flags: &Flags, filter: &Filter, format: Format, root: &str, config_
 
     pool.install(|| {
         let t = Instant::now();
-        let sources: Vec<(String, String)> = paths
-            .par_iter()
-            .filter_map(|p| {
-                let source = lq_check::fs::read_utf8_lossy(Path::new(p)).ok()?;
-                Some((uri::file_uri(p), source))
-            })
-            .collect();
+        // None of what follows is ever dropped. The process is about to end, which is the fast way
+        // to free it, and dropping an AST recurses on nesting depth.
+        let sources: ManuallyDrop<Vec<(String, String)>> = ManuallyDrop::new(
+            paths
+                .par_iter()
+                .filter_map(|p| {
+                    let source = lq_check::fs::read_utf8_lossy(Path::new(p)).ok()?;
+                    Some((uri::file_uri(p), source))
+                })
+                .collect(),
+        );
         let t_read = t.elapsed();
 
         let t = Instant::now();
-        let theme = lq_check::parse_theme(&sources);
+        let theme = ManuallyDrop::new(lq_check::parse_theme(&sources));
         let t_parse = t.elapsed();
 
         let t = Instant::now();
-        let deps = NodeDependencies::new(&theme, &config, root);
-        let mut output = lq_check::check(&theme, &config, &deps);
+        let deps = ManuallyDrop::new(NodeDependencies::new(&theme, &config, root));
+        let mut output = ManuallyDrop::new(lq_check::check(&theme, &config, &*deps));
         let t_checks = t.elapsed();
         let hidden = hidden_errors(&output.offenses, &selection);
         output.offenses.retain(|o| selection.contains(&uri::fs_path(&o.uri)));
@@ -593,9 +615,7 @@ fn run_check(flags: &Flags, filter: &Filter, format: Format, root: &str, config_
                 t0.elapsed()
             );
         }
-        // Leave without dropping ASTs: exiting is the fast way to free them.
-        let code = i32::from(!valid);
-        std::process::exit(code);
+        Ok(i32::from(!valid))
     })
 }
 
@@ -629,6 +649,10 @@ impl Selection {
 
     fn contains(&self, path: &str) -> bool {
         self.all || self.files.iter().any(|f| f == path) || self.dirs.iter().any(|d| path.starts_with(d))
+    }
+
+    fn resolved(self) -> Vec<String> {
+        self.files.into_iter().chain(self.dirs).collect()
     }
 }
 
