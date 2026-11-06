@@ -53,6 +53,7 @@ presented, with no upstream bug behind it.
 | `--output text`, the default | `lq`'s report, with snippets, hints, fix previews and folding |
 | `--output short`, `github`, `json-rich`, `lq explain` | `lq`'s own, with no upstream equivalent |
 | Offenses, messages, positions, fixes, suggestions, exit codes | Not presentation: the same in every format |
+| `lq fmt --check` summary | Prettier's, except that the hint says ``Run `lq fmt` with --write to fix.``, because that's the command the reader has. `fmt-config.mjs` allows that one substitution |
 
 Hints are set with `Problem::label`, `note` and `note_at`, and travel in `Offense.hints`, apart from everything the
 goldens and `lint.mjs` compare. They're not a `Divergence`, because no check behaves differently, so `divergences.mjs`

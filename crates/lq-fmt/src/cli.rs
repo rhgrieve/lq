@@ -404,7 +404,7 @@ pub fn run_fmt(args: &FmtArgs) -> i32 {
                 eprintln!("[warn] Code style issues fixed in {files}.");
             } else {
                 eprintln!(
-                    "[warn] Code style issues found in {files}. Run Prettier with --write to fix."
+                    "[warn] Code style issues found in {files}. Run `lq fmt` with --write to fix."
                 );
             }
         }

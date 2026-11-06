@@ -26,8 +26,10 @@ const oracle = (cwd, patterns) => run('node', [PRETTIER, '--check', '--cache-loc
 const ours = (cwd, patterns) => run(lq, ['fmt', ...patterns, '--check'], cwd);
 // Prettier prints a stack for errors without a location: the first line is the comparable part.
 const noStack = (r) => ({ ...r, err: r.err.split('\n').filter((l) => !/^\[error\]\s+at /.test(l)).join('\n') });
+// lq names its own command in the --check hint: see Presentation in DIVERGENCES.md.
+const ownHint = (r) => ({ ...r, err: r.err.replace('Run Prettier with --write to fix.', 'Run `lq fmt` with --write to fix.') });
 const compare = (label, a0, b0) => {
-  const a = noStack(a0), b = noStack(b0);
+  const a = ownHint(noStack(a0)), b = noStack(b0);
   const same = a.code === b.code && a.out === b.out && a.err === b.err;
   console.log(`[fmt/config] ${label}: oracle exit ${a.code}, lq exit ${b.code}; stdout ${a.out === b.out ? 'same' : 'DIFFERS'}, stderr ${a.err === b.err ? 'same' : 'DIFFERS'}`);
   if (!same) {
