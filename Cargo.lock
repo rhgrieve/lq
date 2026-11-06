@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "lq-check"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "lq-json",
  "lq-syntax",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "lq-cli"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "libc",
  "lq-check",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "lq-fmt"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "biome_css_formatter",
  "biome_css_parser",
@@ -795,18 +795,18 @@ dependencies = [
 
 [[package]]
 name = "lq-json"
-version = "0.1.2"
+version = "0.2.0"
 
 [[package]]
 name = "lq-syntax"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "lq-theme"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "lq-json",
 ]
