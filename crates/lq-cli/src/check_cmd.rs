@@ -10,6 +10,7 @@ use lq_theme::config::{load_config, Config, ConfigError};
 use lq_theme::discovery::get_theme_files;
 use lq_theme::divergence::{parse_divergence_flag, Divergences};
 use rayon::prelude::*;
+use crate::filter::Filter;
 use crate::report::term::{style, ColorChoice, Term};
 use crate::report::upstream::{card, grouped, render_json, render_text};
 use crate::report::{fail_threshold, machine, rail, Report};
@@ -78,6 +79,9 @@ struct Flags {
     divergences: Divergences,
     /// Files or directories to report offenses for. The whole theme is still loaded.
     files: Vec<String>,
+    only: Vec<String>,
+    skip: Vec<String>,
+    severity: Option<Severity>,
 }
 
 pub const CHECK_HELP: &str = "\
@@ -90,7 +94,20 @@ so cross-file checks stay correct, but only offenses in those files are reported
 the exit code. Paths are relative to the current directory or to the theme root; a path that
 doesn't exist is skipped with a warning. Fits lefthook's {staged_files}.
 
+Filters narrow the report the same way: every check still runs, but only what's left is shown,
+decides the exit code and is fixed by --auto-correct. A note on stderr says how much was left out.
+
+  lq check --only OrphanedSnippet          one check
+  lq check --only orphan,asset             any check with that in its name, in any case
+  lq check --only 'Asset*' --skip AssetPreload
+  lq check --severity error snippets/      errors, in these files
+  lq check --only asset --list             which enabled checks a filter selects
+
 Options:
+      --only <checks>      Report only these checks. A full name, part of a name, or a pattern
+                           with *. Comma separated or repeated
+      --skip <checks>      Don't report these checks, in the same forms. Wins over --only
+      --severity <level>   Report this severity and worse: error, warning or info
   -p, --path <dir>         Theme root [default: current directory]
   -C, --config <file>      Config file, or theme-check:all, :recommended, :theme-app-extension,
                            :nothing [default: .theme-check.yml in the root]
@@ -123,6 +140,17 @@ Run `lq explain <Check>` for what a check does and how to configure or disable i
 const OUTPUTS: [&str; 6] = ["text", "short", "github", "json", "json-rich", "upstream"];
 
 const LEVELS: [&str; 6] = ["crash", "error", "suggestion", "style", "warning", "info"];
+
+/// `a,b` and repeating the flag are the same. An empty name would select every check.
+fn push_selectors(into: &mut Vec<String>, name: &str, value: &str) -> Result<(), String> {
+    for text in value.split(',').map(str::trim) {
+        if text.is_empty() {
+            return Err(format!("Flag {name} expects check names, separated by commas"));
+        }
+        into.push(text.to_string());
+    }
+    Ok(())
+}
 
 fn parse_flags(args: &[String]) -> Result<Flags, String> {
     let mut f = Flags::default();
@@ -166,6 +194,16 @@ fn parse_flags(args: &[String]) -> Result<Flags, String> {
                     return Err(format!("Expected --fail-level={v} to be one of: {}", LEVELS.join(", ")));
                 }
                 f.fail_level = Some(v);
+            }
+            "--only" => push_selectors(&mut f.only, name, &value(&mut i)?)?,
+            "--skip" => push_selectors(&mut f.skip, name, &value(&mut i)?)?,
+            "--severity" => {
+                f.severity = Some(match value(&mut i)?.as_str() {
+                    "error" => Severity::Error,
+                    "warning" => Severity::Warning,
+                    "info" => Severity::Info,
+                    v => return Err(format!("Expected --severity={v} to be one of: error, warning, info")),
+                });
             }
             "--json" | "-j" => f.json = true,
             "--auto-correct" | "-a" => f.auto_correct = true,
@@ -274,7 +312,7 @@ fn print_config(config: &Config) {
     println!("{}", lq_theme::yaml::stringify(&Value::Object(o)));
 }
 
-fn list_checks(config: &Config) {
+fn list_checks(config: &Config, filter: &Filter) {
     let ignore = config.ignore.clone().unwrap_or_default();
     let ignored_patterns = format!("[{}]", ignore.join(", "));
     let mut out = Object::new();
@@ -288,6 +326,9 @@ fn list_checks(config: &Config) {
             .and_then(Value::as_f64)
             .and_then(Severity::from_number)
             .unwrap_or(Severity::Info);
+        if !filter.allows(code, severity) {
+            continue;
+        }
         let mut entry = Object::new();
         entry.insert("severity", Value::String(severity.as_str().to_string()));
         if config.checks.contains(&code) {
@@ -344,6 +385,13 @@ pub fn check(args: &[String]) -> i32 {
         print!("{CHECK_HELP}");
         return 0;
     }
+    let filter = match Filter::new(&flags.only, &flags.skip, flags.severity) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
     let format = Format::of(&flags);
     let json = format.is_machine();
     if json {
@@ -377,10 +425,10 @@ pub fn check(args: &[String]) -> i32 {
             return Ok(0);
         }
         if flags.list {
-            list_checks(&load(config_path.as_deref(), &root)?);
+            list_checks(&load(config_path.as_deref(), &root)?, &filter);
             return Ok(0);
         }
-        run_check(&flags, format, &root, config_path.as_deref())
+        run_check(&flags, &filter, format, &root, config_path.as_deref())
     })();
     match result {
         Ok(code) => code,
@@ -405,7 +453,7 @@ pub fn check(args: &[String]) -> i32 {
     }
 }
 
-fn run_check(flags: &Flags, format: Format, root: &str, config_path: Option<&str>) -> Result<i32, CliError> {
+fn run_check(flags: &Flags, filter: &Filter, format: Format, root: &str, config_path: Option<&str>) -> Result<i32, CliError> {
     let timing = flags.timings || std::env::var_os("LQ_TIMING").is_some();
     let t0 = Instant::now();
     let selection = Selection::new(&flags.files, root);
@@ -453,6 +501,7 @@ fn run_check(flags: &Flags, format: Format, root: &str, config_path: Option<&str
         let t_checks = t.elapsed();
         let hidden = hidden_errors(&output.offenses, &selection);
         output.offenses.retain(|o| selection.contains(&uri::fs_path(&o.uri)));
+        let filtered_note = filter.apply(&mut output.offenses);
         let inspected = sources.iter().filter(|(u, _)| selection.contains(&uri::fs_path(u))).count();
         if let Some(reason) = deps.graph_failure().filter(|_| config.divergences.contains(lq_check::Divergence::GraphFailure)) {
             eprintln!("[lq] warning: the theme graph failed to build, so OrphanedSnippet and ValidScopedCSSClass were skipped: {reason}");
@@ -511,6 +560,12 @@ fn run_check(flags: &Flags, format: Format, root: &str, config_path: Option<&str
         let t_output = t.elapsed();
 
         if let Some(note) = hidden_note(hidden) {
+            eprintln!("{note}");
+        }
+        if let Some(note) = filtered_note {
+            eprintln!("{note}");
+        }
+        for note in filter.turned_off_notes(&config.checks) {
             eprintln!("{note}");
         }
 

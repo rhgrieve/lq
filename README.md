@@ -65,6 +65,8 @@ lq check --output github              # annotations for GitHub Actions
 lq check --output json-rich           # the whole text report as data, hints included
 lq check --output upstream            # upstream's text layout
 lq explain MissingTemplate            # what a check does, and how to configure or disable it
+lq check --only OrphanedSnippet       # report one check; see "Filtering"
+lq check --severity error             # report errors only
 lq check --fail-level warning         # exit 1 on warnings too
 lq check --auto-correct               # apply safe fixes in place
 lq check --timings                    # time per phase, on stderr
@@ -81,6 +83,26 @@ for Liquid files.
 File arguments to `lq check` narrow what is *reported*, and what decides the exit code. If other files have errors, a note on stderr says how many. The whole theme is still
 loaded, so cross-file checks stay correct: a file's offenses are the same either way. Paths may be relative to the
 current directory or to the theme root, a directory selects everything under it, and a path that doesn't exist exits 2.
+
+### Filtering
+
+```sh
+lq check --only OrphanedSnippet                # one check
+lq check --only orphan,asset                   # any check with that in its name, in any case
+lq check --only 'Asset*' --skip AssetPreload   # * anchors the pattern; --skip wins over --only
+lq check --severity warning snippets/          # errors and warnings, in these files
+lq check --only DeprecatedFilter --auto-correct # fix one kind of problem
+lq check --only asset --list                   # which enabled checks a filter selects
+```
+
+The report's summary lists the checks it found, to copy into `--only`. These flags are `lq`'s own, not upstream's.
+
+Filters work like file arguments: every check still runs, and they narrow what is reported, what decides the exit code and
+what `--auto-correct` touches. A filtered report is exactly a subset of the full one, in every output format. A note on
+stderr says how much was left out, and a check turned off in the config gets a note rather than looking clean. A name that
+matches no check exits 2 and suggests the closest one, so a typo can't pass as a clean theme.
+
+A full name or alias selects just that check, so `ValidSchema` leaves out `ValidSchemaName`.
 
 ### lefthook
 

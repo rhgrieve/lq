@@ -3,6 +3,7 @@ use std::io::Write;
 
 mod check_cmd;
 mod explain;
+mod filter;
 mod report;
 
 #[global_allocator]
