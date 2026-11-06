@@ -237,7 +237,7 @@ impl Config {
 // ---------------------------------------------------------------------------
 
 fn is_absolute(p: &str) -> bool {
-    p.starts_with('/')
+    p.starts_with('/') || uri::is_drive_absolute(p)
 }
 
 /// `path.resolve(root, p)`, where `root` is absolute.
@@ -454,15 +454,16 @@ fn resolve_path_value(root: &str, v: &Value) -> Result<String, ConfigError> {
 }
 
 fn resolve_path(root: &str, path_like: &str) -> Result<String, ConfigError> {
-    if is_absolute(path_like) {
-        return Ok(path_like.to_string());
+    let path_like = uri::from_native(path_like);
+    if is_absolute(&path_like) {
+        return Ok(path_like);
     }
     if path_like.starts_with('.') {
-        return Ok(path_resolve(root, path_like));
+        return Ok(path_resolve(root, &path_like));
     }
-    let resolved = node_require_resolve(root, path_like)?;
+    let resolved = node_require_resolve(root, &path_like)?;
     fs::canonicalize(&resolved)
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| uri::from_native(&p.to_string_lossy()))
         .map_err(|e| fs_error(&e, "lstat", &resolved))
 }
 

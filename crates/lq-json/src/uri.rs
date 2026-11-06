@@ -362,6 +362,10 @@ pub fn posix_normalize(path: &str) -> String {
     }
     if absolute {
         out.insert(0, '/');
+        // `//server/share` is a different place from `/server/share` on Windows.
+        if cfg!(windows) && path.starts_with("//") {
+            out.insert(0, '/');
+        }
     }
     out
 }
@@ -374,7 +378,8 @@ pub fn posix_join<S: AsRef<str>>(parts: &[S]) -> String {
         if p.is_empty() {
             continue;
         }
-        if !joined.is_empty() {
+        // Not doubled after a root of `/`, which `posix_normalize` would read as a share on Windows.
+        if !joined.is_empty() && !joined.ends_with('/') {
             joined.push('/');
         }
         joined.push_str(p);
@@ -389,6 +394,10 @@ pub fn posix_join<S: AsRef<str>>(parts: &[S]) -> String {
 pub fn posix_dirname(path: &str) -> String {
     if path.is_empty() {
         return ".".into();
+    }
+    // A drive is its own parent, so that walking up stops there as it does at `/`.
+    if cfg!(windows) && path.trim_end_matches('/').len() == 2 && has_drive(path) {
+        return path.into();
     }
     let b = path.as_bytes();
     let has_root = b[0] == b'/';
@@ -539,9 +548,80 @@ pub fn file_uri(absolute_path: &str) -> String {
     normalize_uri(&Uri::file(absolute_path))
 }
 
+// ---- Windows paths --------------------------------------------------------
+
+/// A path from the OS, in the form everything here works on: `/` separators and, on Windows, a
+/// lowercase drive letter, which is what `fs_path` gives back. Windows accepts these paths too.
+pub fn from_native(path: &str) -> String {
+    if cfg!(windows) {
+        windows_to_posix(path)
+    } else {
+        path.to_string()
+    }
+}
+
+/// A path from `fs_path`, written as upstream's output has it on this OS.
+pub fn to_native(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.to_string()
+    }
+}
+
+/// `c:/x` or `c:\x`. Only on Windows, where `c:` isn't an ordinary directory name.
+pub fn is_drive_absolute(path: &str) -> bool {
+    cfg!(windows) && has_drive(path) && matches!(path.as_bytes().get(2), Some(b'/' | b'\\'))
+}
+
+fn has_drive(path: &str) -> bool {
+    let b = path.as_bytes();
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+fn windows_to_posix(path: &str) -> String {
+    // `canonicalize` gives verbatim paths, which don't accept `/`.
+    let path = match path.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}"),
+        None => path.strip_prefix(r"\\?\").unwrap_or(path).to_string(),
+    };
+    let mut out = path.replace('\\', "/");
+    if has_drive(&out) {
+        out[..1].make_ascii_lowercase();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_paths_become_posix() {
+        assert_eq!(windows_to_posix(r"C:\Users\a\theme"), "c:/Users/a/theme");
+        assert_eq!(windows_to_posix(r"\\?\C:\Users\a"), "c:/Users/a");
+        assert_eq!(windows_to_posix(r"\\?\UNC\server\share\a"), "//server/share/a");
+        assert_eq!(windows_to_posix(r"\\server\share\a"), "//server/share/a");
+        assert_eq!(windows_to_posix("c:/already"), "c:/already");
+    }
+
+    #[test]
+    fn a_drive_path_round_trips_through_a_uri() {
+        let u = file_uri(&windows_to_posix(r"C:\Users\a b\theme"));
+        assert_eq!(u, "file:///c:/Users/a b/theme");
+        assert_eq!(fs_path(&join(&u, &["snippets", "x.liquid"])), "c:/Users/a b/theme/snippets/x.liquid");
+        assert_eq!(relative(&join(&u, &["snippets/x.liquid"]), &u), "snippets/x.liquid");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn walking_up_stops_at_the_drive() {
+        assert_eq!(posix_dirname("c:/a"), "c:");
+        assert_eq!(posix_dirname("c:"), "c:");
+        assert_eq!(posix_dirname("c:/"), "c:/");
+        assert_eq!(posix_normalize("//server/share/a/../b"), "//server/share/b");
+        assert!(is_drive_absolute(r"c:\a") && is_drive_absolute("c:/a") && !is_drive_absolute("c:a"));
+    }
 
     #[test]
     fn normalize_root() {

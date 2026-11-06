@@ -73,7 +73,10 @@ impl<'a> NodeDependencies<'a> {
         let mut section_schemas = HashMap::new();
         let mut doc_definitions = HashMap::new();
         let mut liquid_uris = HashMap::new();
-        let encoded_root = uri::Uri::file(root).to_string_with(false);
+        // Upstream's encoded root only matches a file's URI when encoding changes nothing. On
+        // Windows it never does, since a drive's `:` encodes, and doc lookups would all miss.
+        let encoded_root =
+            if cfg!(windows) { uri::file_uri(root) } else { uri::Uri::file(root).to_string_with(false) };
         for (i, file) in theme.iter().enumerate() {
             let is_liquid = file.uri.ends_with(".liquid");
             if is_block(&file.uri) {

@@ -123,7 +123,9 @@ fn json_locations(json: &str, root: &str) -> Vec<(String, String, String)> {
         .skip(1)
         .map(|issue| {
             let path = &issue[..issue.find('"').unwrap()];
-            let path = path.strip_prefix(root).unwrap_or(path).trim_start_matches('/').to_string();
+            // Upstream's JSON has native separators, escaped; the other formats always use `/`.
+            let path = path.replace("\\\\", "/");
+            let path = path.strip_prefix(root).unwrap_or(&path).trim_start_matches('/').to_string();
             (path, field(issue, "\"startRow\":"), field(issue, "\"startColumn\":"))
         })
         .collect()
@@ -132,8 +134,10 @@ fn json_locations(json: &str, root: &str) -> Vec<(String, String, String)> {
 /// Folding and formats change how an offense is shown, never whether it is.
 fn assert_every_location_is_reported(root: &Path) {
     let json = text(&run_in(root, &["-o", "json"], &[]).stdout);
-    let root_text = root.canonicalize().unwrap();
-    let locations = json_locations(&json, &root_text.to_string_lossy());
+    // The child's working directory: resolved on Unix, and as it was given on Windows, where
+    // canonicalizing would also expand 8.3 names such as the runner's `RUNNER~1`.
+    let root_text = if cfg!(windows) { std::path::absolute(root).unwrap() } else { root.canonicalize().unwrap() };
+    let locations = json_locations(&json, &lq_json::uri::from_native(&root_text.to_string_lossy()));
     let report = text(&run_in(root, &["--color", "never"], &[]).stderr);
     let short = text(&run_in(root, &["-o", "short"], &[]).stdout);
     let github = text(&run_in(root, &["-o", "github"], &[]).stdout);

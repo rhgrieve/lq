@@ -104,7 +104,7 @@ fn diagnostic(report: &Report<'_>, o: &Offense, group: usize) -> Value {
     d.insert("severity", Value::String(o.severity.as_str().to_string()));
     d.insert("message", Value::String(o.message.clone()));
     d.insert("file", Value::String(report.display_path(&o.uri)));
-    d.insert("absolutePath", Value::String(uri::fs_path(&o.uri)));
+    d.insert("absolutePath", Value::String(uri::to_native(&uri::fs_path(&o.uri))));
     d.insert("start", position(&o.start, o.start_byte));
     d.insert("end", position(&o.end, o.end_byte));
     d.insert("label", o.hints.label.clone().map_or(Value::Null, Value::String));

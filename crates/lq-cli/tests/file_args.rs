@@ -52,6 +52,38 @@ fn the_whole_theme_has_no_note() {
     fs::remove_dir_all(root).unwrap();
 }
 
+/// Windows sends this through a different walk: `Program Files (x86)` is glob magic.
+#[test]
+fn a_root_with_glob_characters_is_walked() {
+    let root = theme("glob (x86)");
+    let o = lq(&root, &["check"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stderr(&o).contains("LiquidHTMLSyntaxError"), "{}", stderr(&o));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Doc lookups key on the path from the root, which is easy to get wrong with a Windows drive.
+#[test]
+fn a_render_is_checked_against_the_doc_of_its_snippet() {
+    let root = theme("doc");
+    fs::remove_file(root.join("snippets/broken.liquid")).unwrap();
+    fs::write(root.join("snippets/card.liquid"), "{% doc %}\n  @param {string} title\n{% enddoc %}\n{{ title }}\n").unwrap();
+    fs::write(root.join("snippets/page.liquid"), "{% render 'card', nope: 'a' %}\n").unwrap();
+    let o = lq(&root, &["check"]);
+    assert!(stderr(&o).contains("UnrecognizedRenderSnippetArguments"), "{}", stderr(&o));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn a_path_with_backslashes_selects_the_file() {
+    let root = theme("backslash");
+    let o = lq(&root, &["check", r"snippets\broken.liquid"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(stderr(&o).contains("LiquidHTMLSyntaxError"), "{}", stderr(&o));
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_path_that_does_not_exist_fails() {
     let root = theme("missing");

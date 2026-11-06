@@ -29,7 +29,9 @@ use std::fs;
 /// The absolute paths of the theme's files, in upstream's order.
 pub fn get_theme_files(config: &Config) -> Vec<String> {
     let root = uri::posix_normalize(&uri::fs_path(&config.root_uri));
-    let root = if root.len() > 1 { root.trim_end_matches('/').to_string() } else { root };
+    // `c:` alone would mean the current directory on that drive.
+    let is_drive_root = cfg!(windows) && root.ends_with(":/");
+    let root = if root.len() > 1 && !is_drive_root { root.trim_end_matches('/').to_string() } else { root };
     let prune = prune_matchers(config);
     let mut found = Vec::new();
     if root.contains(['*', '?', '[', ']', '{', '}', '(', ')', '\\', '!', '+', '@']) {
@@ -120,7 +122,8 @@ fn walk_magic_root(root: &str, prune: &[&Minimatch], out: &mut Vec<String>) {
             let mut next = Vec::new();
             for d in &dirs {
                 match seg {
-                    SegRef::Lit(l) if i == 0 && l.is_empty() => next.push("/".to_string()),
+                    // The root is absolute, so this is `/` or a Windows drive.
+                    SegRef::Lit(l) if i == 0 => next.push(format!("{l}/")),
                     SegRef::Lit(l) => next.push(join(d, l)),
                     SegRef::Globstar => next.push(join(d, "**")),
                     SegRef::Magic(m) => {

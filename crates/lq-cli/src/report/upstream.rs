@@ -163,7 +163,7 @@ pub(crate) fn grouped(offenses: &[Offense]) -> Vec<(String, Vec<&Offense>)> {
     let mut groups: Vec<(String, Vec<&Offense>)> = Vec::new();
     let mut index = BTreeMap::new();
     for o in offenses {
-        let path = uri::fs_path(&o.uri);
+        let path = uri::to_native(&uri::fs_path(&o.uri));
         let i = *index.entry(path.clone()).or_insert_with(|| {
             groups.push((path, Vec::new()));
             groups.len() - 1
@@ -186,9 +186,10 @@ pub(crate) fn render_text(root: &str, groups: &[(String, Vec<&Offense>)], source
     let mut out = String::from("\n");
     let mut sorted: Vec<&(String, Vec<&Offense>)> = groups.iter().collect();
     sorted.sort_by(|a, b| a.0.encode_utf16().cmp(b.0.encode_utf16()));
+    let root = uri::to_native(root);
     for (path, list) in sorted {
         // `c.replace(path, '').slice(1)`.
-        let headline = match path.find(root) {
+        let headline = match path.find(&root) {
             Some(i) => format!("{}{}", &path[..i], &path[i + root.len()..]),
             None => path.clone(),
         };

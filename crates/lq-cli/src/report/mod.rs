@@ -41,7 +41,7 @@ impl<'a> Report<'a> {
         sorted.sort_by(|a, b| a.0.encode_utf16().cmp(b.0.encode_utf16()).then(a.1.start_byte.cmp(&b.1.start_byte)));
         Report {
             root,
-            cwd: std::env::current_dir().map_or_else(|_| String::new(), |d| uri::posix_normalize(&d.to_string_lossy())),
+            cwd: std::env::current_dir().map_or_else(|_| String::new(), |d| uri::posix_normalize(&uri::from_native(&d.to_string_lossy()))),
             offenses: sorted.into_iter().map(|(_, o)| o).collect(),
             sources: sources.iter().map(|(u, s)| (u.as_str(), s.as_str())).collect(),
             inspected: 0,

@@ -203,7 +203,7 @@ fn parse_flags(args: &[String]) -> Result<Flags, String> {
 }
 
 fn absolute(p: &str) -> String {
-    std::path::absolute(p).map_or_else(|_| p.to_string(), |a| a.to_string_lossy().into_owned())
+    std::path::absolute(p).map_or_else(|_| uri::from_native(p), |a| uri::from_native(&a.to_string_lossy()))
 }
 
 const LEGACY: [(&str, &str); 8] = [
@@ -558,7 +558,7 @@ impl Selection {
         let mut s = Selection { files: Vec::new(), dirs: Vec::new(), missing: Vec::new(), all: args.is_empty() };
         for arg in args {
             let from_cwd = uri::posix_normalize(&absolute(arg));
-            let from_root = uri::posix_normalize(&Path::new(root).join(arg).to_string_lossy());
+            let from_root = uri::posix_normalize(&uri::from_native(&Path::new(root).join(arg).to_string_lossy()));
             let Some(path) = [from_cwd, from_root].into_iter().find(|p| Path::new(p).exists()) else {
                 s.missing.push(arg.clone());
                 continue;

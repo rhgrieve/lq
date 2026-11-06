@@ -165,10 +165,12 @@ fn expand_patterns(
                 }
             }
             Err(_) => {
+                // `fixWindowsSlashes`: in a glob `\` would otherwise escape.
+                let pattern = if cfg!(windows) { pattern.replace('\\', "/") } else { pattern.clone() };
                 if let Some(rest) = pattern.strip_prefix('!') {
                     negative.push(Glob::new(rest));
                 } else {
-                    entries.push(("glob", pattern.clone()));
+                    entries.push(("glob", pattern));
                 }
             }
         }
