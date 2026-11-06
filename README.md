@@ -31,7 +31,7 @@ to `package.json`:
 ```json
 {
   "devDependencies": {
-    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.1.1/lq-theme-check-0.1.1.tgz"
+    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.1.2/lq-theme-check-0.1.2.tgz"
   }
 }
 ```
