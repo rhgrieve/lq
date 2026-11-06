@@ -2,9 +2,11 @@ name: Release
 
 # Pushing a tag like v0.1.0 builds every platform, packs one npm tarball, tests it on each
 # platform, and attaches it to a GitHub release. The tag must match Cargo.toml's version.
+# Running it by hand on a branch does all of that except the release.
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,19 +26,26 @@ jobs:
           - { platform: darwin-x64, runner: macos-15-intel, target: x86_64-apple-darwin }
           - { platform: linux-arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
           - { platform: linux-x64, runner: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { platform: win32-x64, runner: windows-2025, target: x86_64-pc-windows-msvc, exe: .exe }
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - run: rustup update stable && rustup default stable && rustup target add ${{ matrix.target }}
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # Cargo checks out all of Biome for the git dependency, and some of its paths are long.
+      - if: runner.os == 'Windows'
+        run: git config --system core.longpaths true
       - run: cargo test --workspace --locked --target ${{ matrix.target }}
       - run: cargo build --release --locked -p lq-cli --target ${{ matrix.target }}
-      - run: target/${{ matrix.target }}/release/lq --version
+      - run: target/${{ matrix.target }}/release/lq${{ matrix.exe }} --version
       - uses: actions/upload-artifact@v7
         with:
           name: lq-${{ matrix.platform }}
-          path: target/${{ matrix.target }}/release/lq
+          path: target/${{ matrix.target }}/release/lq${{ matrix.exe }}
           if-no-files-found: error
           retention-days: 3
 
@@ -58,7 +67,7 @@ jobs:
           for d in artifacts/lq-*; do
             platform="${d#artifacts/lq-}"
             mkdir -p "vendor/$platform"
-            mv "$d/lq" "vendor/$platform/lq"
+            mv "$d"/lq* "vendor/$platform/"
           done
       - name: Fetch upstream license texts
         run: |
@@ -68,8 +77,9 @@ jobs:
       - id: pack
         name: Pack
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          tarball="$(node scripts/pack-npm.mjs --vendor vendor --out dist --upstream upstream --version "$version")"
+          version=()
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version=(--version "${GITHUB_REF_NAME#v}"); fi
+          tarball="$(node scripts/pack-npm.mjs --vendor vendor --out dist --upstream upstream "${version[@]}")"
           echo "tarball=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
@@ -83,7 +93,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        runner: [macos-15, macos-15-intel, ubuntu-24.04-arm, ubuntu-24.04]
+        runner: [macos-15, macos-15-intel, ubuntu-24.04-arm, ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/setup-node@v7
@@ -109,6 +119,7 @@ jobs:
 
   release:
     needs: [pack, test]
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: write

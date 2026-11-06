@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const platform = `${process.platform}-${process.arch}`;
-const binary = path.join(__dirname, '..', 'vendor', platform, 'lq');
+const binary = path.join(__dirname, '..', 'vendor', platform, process.platform === 'win32' ? 'lq.exe' : 'lq');
 
 if (!fs.existsSync(binary)) {
   const available = fs.readdirSync(path.join(__dirname, '..', 'vendor')).join(', ');

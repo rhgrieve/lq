@@ -1,0 +1,2 @@
+# Fixtures and snapshots are compared byte for byte, so a Windows checkout mustn't convert them.
+* -text

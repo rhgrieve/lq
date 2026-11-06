@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 // Builds the npm tarball that releases attach, from binaries already built.
 //   scripts/pack-npm.mjs --vendor DIR --out DIR --upstream DIR [--version X.Y.Z] [--allow-missing]
-// DIR/<platform>-<arch>/lq holds each binary, with names as in Node's process.platform and
-// process.arch. Every platform is required unless --allow-missing, which is for local tests.
+// DIR/<platform>-<arch>/lq (lq.exe on Windows) holds each binary, with names as in Node's
+// process.platform and process.arch. Every platform is required unless --allow-missing, which is
+// for local tests.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'];
+export const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64'];
 const NAME = 'lq-theme-check';
+const binaryName = (platform) => (platform.startsWith('win32-') ? 'lq.exe' : 'lq');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -29,7 +31,7 @@ const out = val('--out');
 const upstream = val('--upstream');
 if (!vendor || !out || !upstream) fail('usage: pack-npm.mjs --vendor DIR --out DIR --upstream DIR [--version X.Y.Z] [--allow-missing]');
 
-const found = PLATFORMS.filter((p) => fs.existsSync(path.join(vendor, p, 'lq')));
+const found = PLATFORMS.filter((p) => fs.existsSync(path.join(vendor, p, binaryName(p))));
 const absent = PLATFORMS.filter((p) => !found.includes(p));
 if (absent.length && !args.includes('--allow-missing')) fail(`Missing binaries: ${absent.join(', ')}`);
 if (!found.length) fail('No binaries found');
@@ -41,8 +43,8 @@ const licenses = execFileSync(process.execPath, [path.join(ROOT, 'scripts/third-
 fs.writeFileSync(path.join(work, 'THIRD_PARTY_LICENSES.md'), licenses);
 for (const p of found) {
   fs.mkdirSync(path.join(work, 'vendor', p), { recursive: true });
-  fs.copyFileSync(path.join(vendor, p, 'lq'), path.join(work, 'vendor', p, 'lq'));
-  fs.chmodSync(path.join(work, 'vendor', p, 'lq'), 0o755);
+  fs.copyFileSync(path.join(vendor, p, binaryName(p)), path.join(work, 'vendor', p, binaryName(p)));
+  fs.chmodSync(path.join(work, 'vendor', p, binaryName(p)), 0o755);
 }
 fs.chmodSync(path.join(work, 'bin/lq.js'), 0o755);
 fs.writeFileSync(
@@ -56,7 +58,7 @@ fs.writeFileSync(
       description: 'A fast native clone of shopify theme check and the Liquid Prettier plugin',
       license: 'MIT',
       bin: { lq: 'bin/lq.js' },
-      os: ['darwin', 'linux'],
+      os: ['darwin', 'linux', 'win32'],
       cpu: ['arm64', 'x64'],
       files: ['bin', 'vendor', 'LICENSE', 'NOTICE.md', 'DIVERGENCES.md', 'THIRD_PARTY_LICENSES.md'],
     },

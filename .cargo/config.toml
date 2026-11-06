@@ -1,0 +1,4 @@
+# Link the C runtime in, so that the binary doesn't need the Visual C++ redistributable. This is
+# the Windows counterpart of the static musl builds on Linux.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

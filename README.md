@@ -25,7 +25,8 @@ tag, so the first build needs network access and takes a few minutes. Nothing do
 
 ### From a GitHub release
 
-Each release attaches an npm tarball with binaries for macOS and Linux, on arm64 and x64. Add it to `package.json`:
+Each release attaches an npm tarball with binaries for macOS and Linux, on arm64 and x64, and for Windows on x64. Add it
+to `package.json`:
 
 ```json
 {
@@ -36,7 +37,7 @@ Each release attaches an npm tarball with binaries for macOS and Linux, on arm64
 ```
 
 The repository must be public, because npm requests the file without GitHub credentials. There's no install script, and
-nothing is downloaded at run time. Windows isn't included.
+nothing is downloaded at run time.
 
 Node's startup is most of the run time on a small theme, so how you call it matters. On Dawn:
 
@@ -276,11 +277,13 @@ runs a fresh process each time. "Cold" means no daemon or cache of ours: the OS 
 1. Set the version in `Cargo.toml`'s `[workspace.package]`, and commit it with the updated `Cargo.lock`.
 2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
 
-`.github/workflows/release.yml` then builds all four platforms and runs the tests on each, packs one tarball with
+`.github/workflows/release.yml` then builds all five platforms and runs the tests on each, packs one tarball with
 `scripts/pack-npm.mjs`, installs and runs that tarball on each platform, and attaches it to a new GitHub release. The tag
-must match `Cargo.toml`, or packing fails. Linux binaries are static (musl), so they don't depend on the host's glibc.
+must match `Cargo.toml`, or packing fails. Linux binaries are static (musl), so they don't depend on the host's glibc, and
+Windows binaries link the C runtime statically, so they don't need the Visual C++ redistributable. To try all of this
+without releasing, run the workflow by hand: `gh workflow run release.yml --ref <branch>`.
 
-To build a tarball locally for this machine only, put the binary at `<vendor>/<platform>-<arch>/lq`, then run
+To build a tarball locally for this machine only, put the binary at `<vendor>/<platform>-<arch>/lq` (`lq.exe` on Windows), then run
 `node scripts/pack-npm.mjs --vendor <vendor> --out dist --upstream <dir> --allow-missing`. `<dir>` holds
 `theme-tools/LICENSE.md` and `prettier/LICENSE`.
 
