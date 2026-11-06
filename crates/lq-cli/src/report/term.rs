@@ -47,6 +47,7 @@ impl Term {
 
     fn for_stream(choice: ColorChoice, tty: bool) -> Term {
         let env = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+        let tty = enable_ansi() && tty;
         let color = wants_color(choice, tty, env);
         let links = tty && color && supports_links();
         let columns = env("COLUMNS").and_then(|c| c.parse().ok()).or_else(terminal_width).unwrap_or(DEFAULT_WIDTH);
@@ -107,9 +108,63 @@ fn terminal_width() -> Option<usize> {
     (ok && size.ws_col > 0).then_some(size.ws_col as usize)
 }
 
-#[cfg(not(unix))]
-fn terminal_width() -> Option<usize> {
-    None
+#[cfg(unix)]
+fn enable_ansi() -> bool {
+    true
+}
+
+#[cfg(windows)]
+use console::{enable_ansi, terminal_width};
+
+#[cfg(windows)]
+mod console {
+    use std::ffi::c_void;
+
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x4;
+
+    /// `CONSOLE_SCREEN_BUFFER_INFO`. `window` is left, top, right, bottom.
+    #[repr(C)]
+    #[derive(Default)]
+    struct ScreenBufferInfo {
+        size: [i16; 2],
+        cursor: [i16; 2],
+        attributes: u16,
+        window: [i16; 4],
+        maximum: [i16; 2],
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(id: u32) -> *mut c_void;
+        fn GetConsoleMode(handle: *mut c_void, mode: *mut u32) -> i32;
+        fn SetConsoleMode(handle: *mut c_void, mode: u32) -> i32;
+        fn GetConsoleScreenBufferInfo(handle: *mut c_void, info: *mut ScreenBufferInfo) -> i32;
+    }
+
+    /// Turns on escape sequences in a console. Without them it prints the codes literally. A
+    /// stream that isn't a console, such as a pipe or Git Bash's terminal, needs nothing.
+    pub fn enable_ansi() -> bool {
+        [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].into_iter().all(|id| {
+            let mut mode = 0;
+            // SAFETY: both calls take a handle from `GetStdHandle`, which they check, and the
+            // first only writes `mode`, which is valid here.
+            unsafe {
+                let handle = GetStdHandle(id);
+                GetConsoleMode(handle, &mut mode) == 0
+                    || SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
+            }
+        })
+    }
+
+    pub fn terminal_width() -> Option<usize> {
+        let mut info = ScreenBufferInfo::default();
+        // SAFETY: the call checks the handle and only writes `info`, which is valid here.
+        let ok = unsafe { GetConsoleScreenBufferInfo(GetStdHandle(STD_ERROR_HANDLE), &mut info) } != 0;
+        let columns = i32::from(info.window[2]) - i32::from(info.window[0]) + 1;
+        (ok && columns > 0).then_some(columns as usize)
+    }
 }
 
 #[cfg(test)]
