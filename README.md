@@ -241,7 +241,7 @@ counts and exit codes.
 
 ## Divergences
 
-Upstream has bugs, and `lq` fixes the ones with a demonstrated reproduction. 21 are listed in
+Upstream has bugs, and `lq` fixes the ones with a demonstrated reproduction. 20 are listed in
 [DIVERGENCES.md](DIVERGENCES.md), each with its reproduction and a test against the real upstream. `lq check
 --upstream-bugs` reproduces upstream for all but one: a string `$schema` crashes upstream's whole process, which isn't
 worth reproducing.

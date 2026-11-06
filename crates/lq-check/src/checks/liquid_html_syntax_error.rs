@@ -128,18 +128,14 @@ fn report_parse_error<'a>(error: &ParseError, cx: &LiquidCx<'a, '_>) {
     }
     let highlight = lossy_slice(source, start, end);
     let message = clean_error_message(&error.message, &highlight);
-    if cx.divergence(Divergence::UnclosedTagHint) {
-        if let Some(tag) = find_unclosed_tag(source, start) {
+    cx.report(LiquidProblem::new(message, start, end).hints_if(cx.wants_hints(), |p| match find_unclosed_tag(source, start) {
+        Some(tag) => {
             let line = source.as_bytes()[..tag.close_start as usize].iter().filter(|b| **b == b'\n').count() + 1;
-            let hint = format!(
-                "This tag isn't closed, so it runs on to the `{}` on line {line}. That caused: {message}",
-                tag.close
-            );
-            cx.report(LiquidProblem::new(hint, tag.start, tag.first_line_end));
-            return;
+            let note = format!("this tag isn't closed, so it runs on to the `{}` on line {line}", tag.close);
+            p.note_at(note, cx.uri(), tag.start, tag.first_line_end)
         }
-    }
-    cx.report(LiquidProblem::new(message, start, end));
+        None => p,
+    }));
 }
 
 struct UnclosedTag {
