@@ -21,14 +21,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: rustup update stable && rustup default stable && rustup target add wasm32-unknown-unknown
-      - uses: actions/setup-node@v7
+      - uses: actions/cache@v4
         with:
-          node-version: 22
-      - run: npm install -g wasm-pack@0.14.0
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: site-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: site-${{ runner.os }}-
+      - name: Install wasm-bindgen
+        run: |
+          want=$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/version = |"/, ""); print; exit }' Cargo.lock)
+          if [[ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen $want" ]]; then
+            cargo install wasm-bindgen-cli --version "$want" --locked --force
+          fi
+      - name: Install wasm-opt
+        env:
+          BINARYEN: version_133
+        run: |
+          base=https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN
+          file=binaryen-$BINARYEN-x86_64-linux.tar.gz
+          curl -fsSLO "$base/$file" && curl -fsSLO "$base/$file.sha256"
+          sha256sum -c "$file.sha256"
+          tar xzf "$file"
+          echo "$PWD/binaryen-$BINARYEN/bin" >> "$GITHUB_PATH"
       - run: cargo test --locked -p lq-wasm
-      - run: wasm-pack build crates/lq-wasm --release --target web --out-dir ../../site/pkg --no-typescript
-      # wasm-pack writes a .gitignore that would hide the package from the upload.
-      - run: rm -f site/pkg/.gitignore site/pkg/package.json && ls -la site/pkg
+      - run: scripts/build-site.sh
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site

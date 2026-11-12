@@ -344,7 +344,8 @@ rest of a theme. To build and serve it locally:
 
 ```sh
 rustup target add wasm32-unknown-unknown
-wasm-pack build crates/lq-wasm --release --target web --out-dir ../../site/pkg --no-typescript
+cargo install wasm-bindgen-cli --version 0.2.130 --locked   # the version in Cargo.lock
+scripts/build-site.sh                                       # runs wasm-opt too, if it's on PATH
 python3 -m http.server --directory site
 ```
 
