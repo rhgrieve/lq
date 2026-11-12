@@ -55,7 +55,7 @@ impl<T> Lazy<T> {
 pub struct NodeDependencies<'a> {
     theme: &'a Theme<'a>,
     config: &'a Config,
-    fs: NodeFileSystem,
+    fs: Box<dyn FileSystem>,
     docset: EmbeddedDocset,
     validator: OnceLock<JsonValidator>,
     block_schemas: HashMap<String, Lazy<Option<ThemeSchema<'a>>>>,
@@ -69,6 +69,11 @@ pub struct NodeDependencies<'a> {
 impl<'a> NodeDependencies<'a> {
     /// `root` is the theme path given to `themeCheckRun`.
     pub fn new(theme: &'a Theme<'a>, config: &'a Config, root: &str) -> Self {
+        Self::with_fs(theme, config, root, Box::new(NodeFileSystem))
+    }
+
+    /// Like [`NodeDependencies::new`], reading other files through `fs` instead of the disk.
+    pub fn with_fs(theme: &'a Theme<'a>, config: &'a Config, root: &str, fs: Box<dyn FileSystem>) -> Self {
         let mut block_schemas = HashMap::new();
         let mut section_schemas = HashMap::new();
         let mut doc_definitions = HashMap::new();
@@ -93,7 +98,7 @@ impl<'a> NodeDependencies<'a> {
         NodeDependencies {
             theme,
             config,
-            fs: NodeFileSystem,
+            fs,
             docset: EmbeddedDocset,
             validator: OnceLock::new(),
             block_schemas,
@@ -157,7 +162,7 @@ impl<'a> NodeDependencies<'a> {
 
 impl<'a> Dependencies<'a> for NodeDependencies<'a> {
     fn fs(&'a self) -> &'a dyn FileSystem {
-        &self.fs
+        &*self.fs
     }
 
     fn theme_docset(&'a self) -> Option<&'a dyn ThemeDocset> {
@@ -204,10 +209,10 @@ impl<'a> Dependencies<'a> for NodeDependencies<'a> {
 
     fn css_classes_for_uri(&'a self, u: &str) -> Arc<BTreeSet<String>> {
         if let Some(cell) = self.css_assets().get(u) {
-            return cell.get_or_init(|| Arc::new(css_classes_from_asset_uri(u, &self.fs))).clone();
+            return cell.get_or_init(|| Arc::new(css_classes_from_asset_uri(u, &*self.fs))).clone();
         }
         match self.liquid_uris.get(u) {
-            Some(cell) => cell.get_or_init(|| Arc::new(css_classes_from_liquid_uri(u, &self.fs))).clone(),
+            Some(cell) => cell.get_or_init(|| Arc::new(css_classes_from_liquid_uri(u, &*self.fs))).clone(),
             None => Arc::new(BTreeSet::new()),
         }
     }

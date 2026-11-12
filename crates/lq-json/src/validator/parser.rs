@@ -152,6 +152,10 @@ struct Parser<'s> {
 /// Runs `f` on a fresh stack. Deep recursion stays possible on small thread stacks,
 /// like the rayon workers', without any cost at ordinary depths.
 pub(super) fn on_fresh_stack<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    // No threads on wasm: the module is linked with one large stack instead.
+    #[cfg(target_family = "wasm")]
+    return f();
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|s| {
         std::thread::Builder::new()
             .stack_size(4 << 20)

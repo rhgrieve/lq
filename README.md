@@ -7,6 +7,8 @@ network.
 [Shopify/theme-tools](https://github.com/Shopify/theme-tools), and of the printing algorithm of
 [Prettier](https://github.com/prettier/prettier) (MIT). See [NOTICE.md](NOTICE.md).
 
+Try it in the browser at https://rhgrieve.github.io/lq/.
+
 On Shopify's Horizon theme, `lq check` takes 0.054s against 3.4s for `shopify theme check`, and `lq fmt --check` takes
 0.025s against 2.0s for Prettier: see [Benchmarks](#benchmarks).
 
@@ -333,6 +335,20 @@ Apple M3 Max, 14 cores, 36 GB, Darwin 25.1.0, 2026-11-05. Horizon at `9960490` (
 
 Re-run with `scripts/bench.sh [--runs N] [theme]`. It's read-only, needs nothing beyond bash and what it measures, and
 runs a fresh process each time. "Cold" means no daemon or cache of ours: the OS file cache stays warm.
+
+## Site
+
+`site/` is the landing page at https://rhgrieve.github.io/lq/, plain HTML with a playground that runs `crates/lq-wasm`,
+lq compiled to WebAssembly. The playground checks one file with the recommended config, minus the checks that need the
+rest of a theme. To build and serve it locally:
+
+```sh
+rustup target add wasm32-unknown-unknown
+wasm-pack build crates/lq-wasm --release --target web --out-dir ../../site/pkg --no-typescript
+python3 -m http.server --directory site
+```
+
+`.github/workflows/pages.yml` builds and publishes it on pushes to `main`.
 
 ## Releasing
 

@@ -2,3 +2,8 @@
 # the Windows counterpart of the static musl builds on Linux.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Formatting and checking recurse on nesting depth. Native builds run them on big thread stacks;
+# wasm has no threads, so the module gets one large stack instead.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=33554432"]
