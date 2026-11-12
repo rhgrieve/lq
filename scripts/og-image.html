@@ -1,0 +1,40 @@
+<!doctype html>
+<!--
+  Source of site/og.png, the link preview image. To regenerate it:
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars \
+    --window-size=1200,630 --screenshot=site/og.png "file://$PWD/scripts/og-image.html"
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    background: #111113; color: #ececef;
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 72px 80px; box-sizing: border-box;
+  }
+  .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-variant-ligatures: none; }
+  .logo { font-size: 64px; font-weight: 700; letter-spacing: -0.02em; }
+  h1 { font-size: 56px; line-height: 1.12; letter-spacing: -0.02em; margin: 0; max-width: 980px; }
+  .sub { color: #9b9ba6; font-size: 28px; margin-top: 20px; }
+  .stats { display: flex; gap: 64px; align-items: flex-end; }
+  .stat .n { font-size: 52px; font-weight: 700; color: #4cc38a; }
+  .stat .l { font-size: 22px; color: #9b9ba6; margin-top: 4px; }
+  .url { margin-left: auto; font-size: 24px; color: #9b9ba6; }
+</style>
+</head>
+<body>
+  <div class="logo mono">lq</div>
+  <div>
+    <h1>Theme Check and Liquid formatting, in one fast binary.</h1>
+    <div class="sub">A Rust port of Shopify's <span class="mono">theme check</span> and the Prettier Liquid plugin.</div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n mono">63x</div><div class="l">faster than theme check</div></div>
+    <div class="stat"><div class="n mono">78x</div><div class="l">faster than Prettier</div></div>
+    <div class="url mono">rhgrieve.github.io/lq</div>
+  </div>
+</body>
+</html>
