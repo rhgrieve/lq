@@ -885,6 +885,29 @@ fn load_config_description(
         eprintln!("[lq] note: third-party checks are not supported, ignoring {module}");
     }
 
+    config_from_description(description, root, registry)
+}
+
+/// A built-in config (`theme-check:recommended`, `theme-check:all`, ...) for a theme at `root`,
+/// without touching the filesystem: no `.theme-check.yml` lookup, no third-party checks. For
+/// hosts with no filesystem, like the wasm build.
+pub fn load_builtin_config(
+    name: &str,
+    root: &str,
+    registry: &'static [CheckInfo],
+) -> Result<Config, ConfigError> {
+    if modern_identifier(name).is_none() {
+        return Err(ConfigError::error(format!("not a built-in config: {name}")));
+    }
+    let description = resolve_config(name, true, &[])?;
+    config_from_description(description, root, registry)
+}
+
+fn config_from_description(
+    description: ConfigDescription,
+    root: &str,
+    registry: &'static [CheckInfo],
+) -> Result<Config, ConfigError> {
     let enabled: Vec<&'static CheckInfo> =
         registry.iter().filter(|c| is_enabled_by(&description.check_settings, c)).collect();
     let root_uri = uri::file_uri(root);
