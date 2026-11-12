@@ -1,0 +1,8 @@
+# lq
+
+> A Rust port of Shopify's `theme check` (theme-check 3.31.0) and the Prettier Liquid plugin
+> (@shopify/prettier-plugin-liquid 1.11.3). One binary, no Node, no network. Not affiliated with Shopify.
+
+- [Migrating a theme to lq](https://rhgrieve.github.io/lq/migrate.md): steps for a coding agent to replace Theme Check and Prettier in a theme repository, and verify the results
+- [README](https://github.com/rhgrieve/lq#readme): install, usage, CI, hooks, config files, parity and known gaps
+- [Divergences](https://github.com/rhgrieve/lq/blob/main/DIVERGENCES.md): where lq deliberately differs from upstream

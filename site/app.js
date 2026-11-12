@@ -303,6 +303,22 @@ els.reset = $('reset');
 els.reset.addEventListener('click', () => replaceSource(SAMPLE));
 els.fix.addEventListener('click', () => { if (lastResult && lastResult.fixed) replaceSource(lastResult.fixed); });
 
+const copy = $('copy-prompt');
+copy.addEventListener('click', async () => {
+  const text = $('prompt-text').textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    copy.textContent = 'Copied';
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents($('prompt-text'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    copy.textContent = 'Press ⌘C / Ctrl+C';
+  }
+  setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+});
+
 load();
 renderEditor([]);
 startWorker();

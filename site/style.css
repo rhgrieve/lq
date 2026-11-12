@@ -124,6 +124,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 .code code { font-size: inherit; }
 .code .c { color: var(--muted); }
 
+.prompt {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 14px 14px 14px 16px; margin: 16px 0;
+}
+.prompt pre { flex: 1; min-width: 0; margin: 0; font: 14px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt button { flex: none; min-height: 32px; font-size: 14px; }
+
 /* Playground */
 .playground {
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
@@ -218,7 +225,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 .foot { border-top: 1px solid var(--border); padding-top: 20px; padding-bottom: 40px; margin-top: 72px; color: var(--muted); font-size: 14px; }
 
 @media (max-width: 640px) {
-  .top nav { gap: 14px; }
+  .top nav { gap: 14px; font-size: 14px; }
+  .prompt { flex-direction: column; }
   section.wrap { margin-top: 44px; margin-bottom: 44px; }
   .lede { font-size: 17px; }
   .bench .bar-col { display: none; }
