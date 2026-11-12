@@ -1,21 +1,21 @@
 import { highlight, marks } from './highlight.js';
 
-const SAMPLE = `{% assign on_sale = false %}
-{% assign card_class = 'card' %}
+const SAMPLE = `{% assign card_class = 'card' %}
 <div class="{{card_class}}">
 <a href="{{ product.url | within: collection }}">
-<img src="{{ product.featured_image | img_url: '600x' }}" alt="{{ product.title }}">
+<img src="{{ product.featured_image | image_url: width: 600 }}" alt="{{ product.title | escape }}" width="600" height="600" loading="lazy">
 </a>
 <h3>{{product.title|escape}}</h3>
 {% if product.compare_at_price > product.price %}<span class="badge">Sale</span>{%endif%}
 <p style="color: {{ settings.accent | hex_to_rgba: 0.8 }}">{{ product.price | money }}</p>
-{% include 'price' %}
-<script src="{{ 'card.js' | asset_url }}"></script>
+<div class="stars">{% for star in (1..4.5) %}<span>★</span>{% endfor %}</div>
+<script src="{{ 'card.js' | asset_url }}" defer></script>
 <style>.card{display:grid;gap:8px}</style>
 </div>
 `;
 
-const STORE_KEY = 'lq-playground';
+// Bump the version when SAMPLE changes, so returning visitors see the new one.
+const STORE_KEY = 'lq-playground-2';
 const $ = (id) => document.getElementById(id);
 const els = {
   source: $('source'), gutter: $('gutter'), hl: $('hl'), marks: $('marks'), path: $('path'), width: $('width'), tabs: $('tabs'),
