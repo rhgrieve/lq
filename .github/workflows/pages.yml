@@ -1,0 +1,47 @@
+name: Site
+
+# Builds the landing page and its playground, lq compiled to wasm, and publishes them to GitHub
+# Pages. Needs Settings > Pages > Source set to "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths: ['crates/**', 'data/**', 'site/**', 'Cargo.lock', '.cargo/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup update stable && rustup default stable && rustup target add wasm32-unknown-unknown
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: npm install -g wasm-pack@0.14.0
+      - run: cargo test --locked -p lq-wasm
+      - run: wasm-pack build crates/lq-wasm --release --target web --out-dir ../../site/pkg --no-typescript
+      # wasm-pack writes a .gitignore that would hide the package from the upload.
+      - run: rm -f site/pkg/.gitignore site/pkg/package.json && ls -la site/pkg
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

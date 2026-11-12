@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>lq: fast Theme Check and Liquid formatting</title>
+  <meta name="description" content="lq is a Rust port of Shopify Theme Check and the Prettier Liquid plugin. One binary, no Node, no network. Try it in the browser.">
+  <meta property="og:title" content="lq">
+  <meta property="og:description" content="Shopify Theme Check and the Prettier Liquid plugin, ported to Rust. 63x faster lint, 78x faster formatting on Horizon.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fff' text-anchor='middle'%3Elq%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="modulepreload" href="pkg/lq_wasm.js">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="wrap top">
+    <a class="logo" href="./">lq</a>
+    <nav>
+      <a href="#try">Try it</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/rhgrieve/lq">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="wrap intro">
+      <h1>Theme Check and Liquid formatting, in one fast binary.</h1>
+      <p class="lede">
+        lq is a Rust port of Shopify's <code>theme check</code> and the Prettier Liquid plugin.
+        No Node, no runtime, and it never touches the network.
+      </p>
+      <div class="cta">
+        <a class="button primary" href="#try">Try it in the browser</a>
+        <a class="button" href="#install">Install</a>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="speed-h">
+      <h2 id="speed-h">Speed</h2>
+      <p>Shopify's Horizon theme, 282 Liquid files. Median of 11 runs on an M3 Max.</p>
+      <table class="bench">
+        <thead><tr><th scope="col">Command</th><th scope="col" class="num">Time</th><th scope="col" class="bar-col"><span class="sr-only">Relative</span></th></tr></thead>
+        <tbody>
+          <tr class="lq"><td><code>lq check</code></td><td class="num">0.054s</td><td class="bar-col"><span class="bar" style="--w: 1.6%"></span></td></tr>
+          <tr><td><code>shopify theme check</code></td><td class="num">3.380s</td><td class="bar-col"><span class="bar" style="--w: 100%"></span></td></tr>
+          <tr class="lq"><td><code>lq fmt --check</code></td><td class="num">0.025s</td><td class="bar-col"><span class="bar" style="--w: 0.74%"></span></td></tr>
+          <tr><td><code>prettier --check</code></td><td class="num">1.956s</td><td class="bar-col"><span class="bar" style="--w: 57.9%"></span></td></tr>
+        </tbody>
+      </table>
+      <p class="note">Linting is 63x faster and format checks are 78x faster.</p>
+    </section>
+
+    <section class="wrap" aria-labelledby="compat-h">
+      <h2 id="compat-h">Compatibility</h2>
+      <ul class="facts">
+        <li><strong>All 91 checks.</strong> On Dawn, Horizon and a production theme, it reports the same offenses as <code>theme check</code> 3.31.0.</li>
+        <li><strong>Same formatting as Prettier.</strong> Liquid and HTML output is byte-identical to <code>prettier-plugin-liquid</code> 1.11.3. Embedded JS and CSS go through Biome, which can differ in some cases.</li>
+        <li><strong>Same JSON.</strong> <code>lq check --output json</code> matches upstream byte for byte, so existing tooling keeps working.</li>
+        <li><strong>Upstream bugs fixed.</strong> 20 known bugs, each listed with a reproduction in <a href="https://github.com/rhgrieve/lq/blob/main/DIVERGENCES.md">DIVERGENCES.md</a>. <code>--upstream-bugs</code> turns them back on.</li>
+        <li><strong>Reads your config.</strong> <code>.theme-check.yml</code>, <code>.prettierrc</code> and ignore files work as they do today.</li>
+      </ul>
+    </section>
+
+    <section class="wrap wide" id="try" aria-labelledby="try-h">
+      <h2 id="try-h">Try it</h2>
+      <p>
+        This is lq compiled to WebAssembly, running in your browser. Nothing is uploaded.
+        It checks one file at a time, so checks that need the rest of a theme, like missing snippets or translation keys, are off.
+      </p>
+
+      <div class="playground">
+        <div class="toolbar">
+          <label>File
+            <select id="path">
+              <option value="snippets/product-card.liquid">snippets/product-card.liquid</option>
+              <option value="sections/featured.liquid">sections/featured.liquid</option>
+              <option value="blocks/text.liquid">blocks/text.liquid</option>
+              <option value="layout/theme.liquid">layout/theme.liquid</option>
+              <option value="templates/product.liquid">templates/product.liquid</option>
+            </select>
+          </label>
+          <label>Width
+            <input id="width" type="number" min="40" max="200" step="10" value="120" inputmode="numeric">
+          </label>
+          <label class="check"><input id="tabs" type="checkbox"> Tabs</label>
+          <span class="spacer"></span>
+          <button id="reset" type="button" class="quiet">Reset</button>
+          <button id="fix" type="button" disabled>Apply fixes</button>
+          <button id="format" type="button" class="primary" disabled title="Format (Ctrl+Enter or ⌘+Enter)">Format</button>
+        </div>
+
+        <div class="editor">
+          <pre class="gutter" id="gutter" aria-hidden="true"></pre>
+          <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Liquid source"></textarea>
+        </div>
+
+        <div class="results" aria-live="polite">
+          <div class="status"><span id="status">Loading lq…</span><span id="timing"></span></div>
+          <ol id="offenses" class="offenses"></ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap" id="install" aria-labelledby="install-h">
+      <h2 id="install-h">Install</h2>
+      <p>Add the release tarball to <code>package.json</code>. It ships binaries for macOS and Linux (arm64, x64) and Windows (x64). There's no install script, and nothing is downloaded at run time.</p>
+      <pre class="code"><code>{
+  "devDependencies": {
+    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.2.0/lq-theme-check-0.2.0.tgz"
+  }
+}</code></pre>
+      <p>Or build from source with a Rust toolchain:</p>
+      <pre class="code"><code>cargo install --git https://github.com/rhgrieve/lq lq-cli --locked</code></pre>
+
+      <h3>Usage</h3>
+      <pre class="code"><code>lq check                          <span class="c"># lint the theme in the current directory</span>
+lq check --auto-correct           <span class="c"># apply safe fixes</span>
+lq check --output json            <span class="c"># upstream's JSON</span>
+lq check --only OrphanedSnippet   <span class="c"># report one check</span>
+lq fmt "**/*.liquid" --check      <span class="c"># exit 1 if a file would change</span>
+lq fmt "**/*.liquid" --write      <span class="c"># rewrite in place</span>
+lq all --write                    <span class="c"># fixes, then formatting</span></code></pre>
+      <p>To swap it into an existing theme, replace <code>shopify theme check</code> with <code>lq check</code> and <code>prettier</code> with <code>lq fmt</code> in your scripts. The <a href="https://github.com/rhgrieve/lq#readme">README</a> covers CI, lefthook, report formats and the known gaps.</p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <p>lq is not affiliated with or endorsed by Shopify. It's a port of MIT-licensed code from <a href="https://github.com/Shopify/theme-tools">Shopify/theme-tools</a> and <a href="https://github.com/prettier/prettier">Prettier</a>. MIT license. <a href="https://github.com/rhgrieve/lq/blob/main/NOTICE.md">Notice</a>.</p>
+    <p id="version"></p>
+  </footer>
+</body>
+</html>
