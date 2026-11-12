@@ -1,3 +1,5 @@
+import { highlight, marks } from './highlight.js';
+
 const SAMPLE = `{% assign on_sale = false %}
 {% assign card_class = 'card' %}
 <div class="{{card_class}}">
@@ -16,7 +18,7 @@ const SAMPLE = `{% assign on_sale = false %}
 const STORE_KEY = 'lq-playground';
 const $ = (id) => document.getElementById(id);
 const els = {
-  source: $('source'), gutter: $('gutter'), path: $('path'), width: $('width'), tabs: $('tabs'),
+  source: $('source'), gutter: $('gutter'), hl: $('hl'), marks: $('marks'), path: $('path'), width: $('width'), tabs: $('tabs'),
   format: $('format'), fix: $('fix'), status: $('status'), timing: $('timing'), offenses: $('offenses'),
   version: $('version'),
 };
@@ -97,7 +99,7 @@ function onResult({ id, op, result, error, ms }) {
     lastResult = null;
     els.fix.disabled = true;
     els.offenses.replaceChildren();
-    renderGutter([]);
+    renderEditor([]);
     return;
   }
   if (op === 'format') {
@@ -206,10 +208,10 @@ function renderOffenses(offenses) {
     });
     return li;
   }));
-  renderGutter(offenses);
+  renderEditor(offenses);
 }
 
-function renderGutter(offenses = lastResult ? lastResult.offenses : []) {
+function renderEditor(offenses = lastResult ? lastResult.offenses : []) {
   const lines = els.source.value.split('\n').length;
   const worst = new Map();
   const rank = { error: 0, warning: 1, info: 2 };
@@ -230,7 +232,21 @@ function renderGutter(offenses = lastResult ? lastResult.offenses : []) {
     }
   }
   els.gutter.replaceChildren(frag);
-  els.gutter.scrollTop = els.source.scrollTop;
+
+  // The trailing newline keeps the layers as tall as the textarea's content.
+  const text = els.source.value;
+  els.hl.innerHTML = highlight(text) + '\n ';
+  els.marks.innerHTML = marks(text, offenses) + '\n ';
+  syncScroll();
+}
+
+function syncScroll() {
+  const { scrollTop, scrollLeft } = els.source;
+  els.gutter.scrollTop = scrollTop;
+  for (const layer of [els.hl, els.marks]) {
+    layer.scrollTop = scrollTop;
+    layer.scrollLeft = scrollLeft;
+  }
 }
 
 // Offsets from lq are UTF-16 indexes, the same units as the textarea's.
@@ -260,11 +276,11 @@ function replaceSource(text) {
 }
 
 els.source.addEventListener('input', () => {
-  renderGutter();
+  renderEditor();
   save();
   scheduleCheck();
 });
-els.source.addEventListener('scroll', () => { els.gutter.scrollTop = els.source.scrollTop; });
+els.source.addEventListener('scroll', syncScroll);
 els.source.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
     e.preventDefault();
@@ -287,6 +303,22 @@ els.reset = $('reset');
 els.reset.addEventListener('click', () => replaceSource(SAMPLE));
 els.fix.addEventListener('click', () => { if (lastResult && lastResult.fixed) replaceSource(lastResult.fixed); });
 
+const copy = $('copy-prompt');
+copy.addEventListener('click', async () => {
+  const text = $('prompt-text').textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    copy.textContent = 'Copied';
+  } catch {
+    const range = document.createRange();
+    range.selectNodeContents($('prompt-text'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    copy.textContent = 'Press ⌘C / Ctrl+C';
+  }
+  setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+});
+
 load();
-renderGutter([]);
+renderEditor([]);
 startWorker();

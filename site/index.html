@@ -9,6 +9,7 @@
   <meta property="og:description" content="Shopify Theme Check and the Prettier Liquid plugin, ported to Rust. 63x faster lint, 78x faster formatting on Horizon.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fff' text-anchor='middle'%3Elq%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <link rel="alternate" type="text/markdown" href="migrate.md" title="Migrating a theme to lq">
   <link rel="modulepreload" href="pkg/lq_wasm.js">
   <script type="module" src="app.js"></script>
 </head>
@@ -18,6 +19,7 @@
     <nav>
       <a href="#try">Try it</a>
       <a href="#install">Install</a>
+      <a href="#migrate">Migrate</a>
       <a href="https://github.com/rhgrieve/lq">GitHub</a>
     </nav>
   </header>
@@ -91,7 +93,11 @@
 
         <div class="editor">
           <pre class="gutter" id="gutter" aria-hidden="true"></pre>
-          <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Liquid source"></textarea>
+          <div class="code-area">
+            <pre class="layer" id="hl" aria-hidden="true"></pre>
+            <pre class="layer marks" id="marks" aria-hidden="true"></pre>
+            <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Liquid source"></textarea>
+          </div>
         </div>
 
         <div class="results" aria-live="polite">
@@ -120,7 +126,16 @@ lq check --only OrphanedSnippet   <span class="c"># report one check</span>
 lq fmt "**/*.liquid" --check      <span class="c"># exit 1 if a file would change</span>
 lq fmt "**/*.liquid" --write      <span class="c"># rewrite in place</span>
 lq all --write                    <span class="c"># fixes, then formatting</span></code></pre>
-      <p>To swap it into an existing theme, replace <code>shopify theme check</code> with <code>lq check</code> and <code>prettier</code> with <code>lq fmt</code> in your scripts. The <a href="https://github.com/rhgrieve/lq#readme">README</a> covers CI, lefthook, report formats and the known gaps.</p>
+      <p>To switch an existing theme, replace <code>shopify theme check</code> with <code>lq check</code> and <code>prettier</code> with <code>lq fmt</code>, or <a href="#migrate">have your agent do it</a>. The <a href="https://github.com/rhgrieve/lq#readme">README</a> covers CI, lefthook, report formats and the known gaps.</p>
+    </section>
+
+    <section class="wrap" id="migrate" aria-labelledby="migrate-h">
+      <h2 id="migrate-h">Migrate with your agent</h2>
+      <p>Paste this into Claude Code, Codex, Cursor or another coding agent, in your theme's repository. It points the agent at a <a href="migrate.md">step-by-step migration guide</a>: swap the commands in scripts, hooks and CI, keep your existing config, then compare lq's results with Theme Check and Prettier before reporting back.</p>
+      <div class="prompt">
+        <pre id="prompt-text">Migrate this Shopify theme from `shopify theme check` and Prettier to lq. Follow https://rhgrieve.github.io/lq/migrate.md, then tell me what changed and anything that behaves differently.</pre>
+        <button id="copy-prompt" type="button">Copy</button>
+      </div>
     </section>
   </main>
 

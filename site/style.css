@@ -1,4 +1,13 @@
 :root {
+  --tk-delim: #8a8a94;
+  --tk-tag: #8250df;
+  --tk-filter: #0a6b9a;
+  --tk-str: #1a7f37;
+  --tk-num: #b35900;
+  --tk-kw: #cf222e;
+  --tk-el: #116329;
+  --tk-attr: #8a5a00;
+  --tk-comment: #8a8a94;
   --bg: #fbfbfa;
   --surface: #ffffff;
   --sunken: #f3f3f1;
@@ -32,6 +41,15 @@
     --warning: #e3b341;
     --info: #79a8ff;
     --select: #1d4d37;
+    --tk-delim: #7d7d88;
+    --tk-tag: #c4a1ff;
+    --tk-filter: #6cc4f0;
+    --tk-str: #8fd19e;
+    --tk-num: #f0a35e;
+    --tk-kw: #ff8b85;
+    --tk-el: #7ee2a8;
+    --tk-attr: #e8c178;
+    --tk-comment: #75757f;
     color-scheme: dark;
   }
 }
@@ -106,6 +124,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 .code code { font-size: inherit; }
 .code .c { color: var(--muted); }
 
+.prompt {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 14px 14px 14px 16px; margin: 16px 0;
+}
+.prompt pre { flex: 1; min-width: 0; margin: 0; font: 14px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt button { flex: none; min-height: 32px; font-size: 14px; }
+
 /* Playground */
 .playground {
   border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
@@ -128,7 +153,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .toolbar button.quiet:hover { color: var(--text); border-color: transparent; }
 
 .editor { display: flex; height: 440px; background: var(--bg); position: relative; }
-.gutter, .editor textarea { font: 13.5px/1.6 var(--mono); margin: 0; padding: 12px 0; }
+.gutter, .editor textarea, .layer { font: 13.5px/1.6 var(--mono); margin: 0; padding: 12px 0; }
 .gutter {
   flex: none; min-width: 3.2em; padding-left: 8px; padding-right: 10px; text-align: right;
   color: var(--muted); opacity: 0.6; overflow: hidden; user-select: none; border-right: 1px solid var(--border);
@@ -136,12 +161,34 @@ button:disabled { opacity: 0.45; cursor: default; }
 .gutter .hit { color: var(--error); opacity: 1; font-weight: 700; }
 .gutter .hit.warning { color: var(--warning); }
 .gutter .hit.info { color: var(--info); }
+.code-area { flex: 1; min-width: 0; position: relative; }
+/* The textarea sits on top with transparent text; the layers under it draw the colors and the
+   offense underlines, and scroll with it. */
+.layer, .editor textarea {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  padding-left: 12px; padding-right: 12px; white-space: pre; tab-size: 2; overflow: hidden;
+  border: 0; letter-spacing: normal; word-spacing: normal;
+}
+.layer { color: var(--text); pointer-events: none; padding-right: 40px; }
+.layer.marks { color: transparent; }
 .editor textarea {
-  flex: 1; min-width: 0; border: 0; resize: none; outline: none;
-  padding-left: 12px; padding-right: 12px;
-  background: transparent; color: var(--text); white-space: pre; overflow: auto; tab-size: 2;
+  resize: none; outline: none; overflow: auto;
+  background: transparent; color: transparent; caret-color: var(--text);
 }
 .editor textarea::selection { background: var(--select); }
+
+.tk-delim, .tk-punct, .tk-op { color: var(--tk-delim); }
+.tk-tag { color: var(--tk-tag); }
+.tk-filter { color: var(--tk-filter); }
+.tk-str { color: var(--tk-str); }
+.tk-num { color: var(--tk-num); }
+.tk-kw { color: var(--tk-kw); }
+.tk-el { color: var(--tk-el); }
+.tk-attr, .tk-arg { color: var(--tk-attr); }
+.tk-comment { color: var(--tk-comment); font-style: italic; }
+.sq { text-decoration: underline wavy var(--error); text-decoration-skip-ink: none; text-underline-offset: 3px; }
+.sq.warning { text-decoration-color: var(--warning); }
+.sq.info { text-decoration-color: var(--info); }
 
 .results { border-top: 1px solid var(--border); }
 .status {
@@ -178,7 +225,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 .foot { border-top: 1px solid var(--border); padding-top: 20px; padding-bottom: 40px; margin-top: 72px; color: var(--muted); font-size: 14px; }
 
 @media (max-width: 640px) {
-  .top nav { gap: 14px; }
+  .top nav { gap: 14px; font-size: 14px; }
+  .prompt { flex-direction: column; }
   section.wrap { margin-top: 44px; margin-bottom: 44px; }
   .lede { font-size: 17px; }
   .bench .bar-col { display: none; }
