@@ -1,6 +1,9 @@
 import { highlight, marks } from './highlight.js';
 
-const SAMPLE = `{% assign card_class = 'card' %}
+// One example per file type, checked as that path. Each has only problems that Apply fixes
+// and Format can clear, so the demo ends clean.
+const EXAMPLES = {
+  'snippets/product-card.liquid': `{% assign card_class = 'card' %}
 <div class="{{card_class}}">
 <a href="{{ product.url | within: collection }}">
 <img src="{{ product.featured_image | image_url: width: 600 }}" alt="{{ product.title | escape }}" width="600" height="600" loading="lazy">
@@ -12,9 +15,32 @@ const SAMPLE = `{% assign card_class = 'card' %}
 <script src="{{ 'card.js' | asset_url }}" defer></script>
 <style>.card{display:grid;gap:8px}</style>
 </div>
-`;
+`,
+  'sections/featured.liquid': `<section class="featured" style="background: {{ section.settings.background | hex_to_rgba: 0.1 }}">
+<h2>{{section.settings.heading|escape}}</h2>
+<div class="featured__grid">{% for block in section.blocks %}<div class="featured__item" {{ block.shopify_attributes }}>{{ block.settings.text }}</div>{% endfor %}</div>
+</section>
+{% schema %}
+{"name":"Featured","settings":[{"type":"text","id":"heading","label":"Heading","default":"New arrivals"},{"type":"color","id":"background","label":"Background","default":"#f4f1ea"}],"blocks":[{"type":"text","name":"Text","settings":[{"type":"text","id":"text","label":"Text"}]}],"presets":[{"name":"Featured"}]}
+{% endschema %}
+`,
+  'layout/theme.liquid': `<!doctype html>
+<html lang="{{ request.locale.iso_code }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ page_title }}{% if current_page != 1 %} – Page {{ current_page }}{% endif %}</title>
+{{ 'theme.css' | asset_url | stylesheet_tag }}
+</head>
+<body>
+<main id="MainContent">{{ content_for_layout }}</main>
+</body>
+</html>
+`,
+};
+const DEFAULT_PATH = 'snippets/product-card.liquid';
 
-// Bump the version when SAMPLE changes, so returning visitors see the new one.
+// Bump the version when EXAMPLES change, so returning visitors see the new one.
 const STORE_KEY = 'lq-playground-2';
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -33,15 +59,16 @@ let checkTimer = 0;
 function load() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (saved && typeof saved.source === 'string') {
+    if (saved && typeof saved.source === 'string' && EXAMPLES[saved.path]) {
       els.source.value = saved.source;
-      if (saved.path) els.path.value = saved.path;
+      els.path.value = saved.path;
       if (saved.width) els.width.value = saved.width;
       els.tabs.checked = !!saved.tabs;
       return;
     }
   } catch {}
-  els.source.value = SAMPLE;
+  els.path.value = DEFAULT_PATH;
+  els.source.value = EXAMPLES[DEFAULT_PATH];
 }
 
 function save() {
@@ -295,12 +322,13 @@ els.source.addEventListener('keydown', (e) => {
   }
   if (e.key !== 'Escape') delete els.source.dataset.escaped;
 });
-els.path.addEventListener('change', () => { save(); runCheck(); });
+// Picking an example replaces the editor's text; undo brings the previous text back.
+els.path.addEventListener('change', () => replaceSource(EXAMPLES[els.path.value]));
 els.width.addEventListener('change', save);
 els.tabs.addEventListener('change', save);
 els.format.addEventListener('click', () => send('format'));
 els.reset = $('reset');
-els.reset.addEventListener('click', () => replaceSource(SAMPLE));
+els.reset.addEventListener('click', () => replaceSource(EXAMPLES[els.path.value]));
 els.fix.addEventListener('click', () => { if (lastResult && lastResult.fixed) replaceSource(lastResult.fixed); });
 
 const copy = $('copy-prompt');
