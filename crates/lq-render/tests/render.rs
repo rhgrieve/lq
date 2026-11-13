@@ -140,9 +140,34 @@ fn calibration_recovers_loop_counts_and_costs() {
     let prior = CostModel::builtin();
     let samples = [Sample { page: req.clone(), real: real_tree, label: "collection".into() }];
     let c = calibrate(&theme, &shop, &samples, &prior, Limits::default(), HashMap::new()).unwrap();
-    assert_eq!(c.shapes.get("templates/collection:1"), Some(&7), "{:?}", c.shape_changes);
+    // The loop's real count arrives as a shop size (7 products per collection) or, failing that,
+    // as a per-loop override.
+    let as_size = c.shop_json.as_ref().map(|j| Knobs::from_json(&j["knobs"]).collection_size) == Some(7);
+    assert!(as_size || c.shapes.get("templates/collection:1") == Some(&7), "{:?} {:?}", c.knob_changes, c.shape_changes);
     let fit = &c.pages[0];
     assert!((fit.after_ms - fit.real_ms).abs() / fit.real_ms < 0.05, "real {} after {}", fit.real_ms, fit.after_ms);
     assert!((fit.before_ms - fit.real_ms).abs() > (fit.after_ms - fit.real_ms).abs());
     assert!(fit.matched_share > 0.99);
+}
+
+#[test]
+fn calibration_fits_mock_shop_sizes() {
+    use lq_render::calibrate::{calibrate, Sample};
+    let files = vec![
+        ("layout/theme.liquid".to_string(), "{{ content_for_layout }}".to_string()),
+        ("templates/product.liquid".to_string(), "{% for image in product.images %}\n{{ image.src }}\n{% endfor %}\n{% for variant in product.variants %}\n{{ variant.title }}\n{% endfor %}".to_string()),
+    ];
+    let theme = Theme::from_files(files);
+    let req = PageRequest { template: "product".into(), handle: None };
+    let model = CostModel::builtin();
+    // The "real" store: 12 images and 20 variants per product.
+    let big = Knobs { images_per_product: 12, values_per_option: 5, variants_per_product: 20, ..Knobs::default() };
+    let real_shop = Shop::from_json(&lq_render::shop::generate(&big));
+    let real = render_page(&theme, &real_shop, &req, &model, Limits::default(), &HashMap::new()).unwrap();
+    let real_tree = lq_render::speedscope::read(&real.profile.to_speedscope(&model)).unwrap();
+    let samples = [Sample { page: req, real: real_tree, label: "product".into() }];
+    let c = calibrate(&theme, &shop(), &samples, &model, Limits::default(), HashMap::new()).unwrap();
+    let knobs = Knobs::from_json(&c.shop_json.expect("the shop was refitted")["knobs"]);
+    assert_eq!(knobs.images_per_product, 12, "{:?}", c.knob_changes);
+    assert_eq!(knobs.variants_per_product, 20, "{:?}", c.knob_changes);
 }

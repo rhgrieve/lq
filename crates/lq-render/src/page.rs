@@ -27,6 +27,7 @@ pub struct PageResult {
     pub profile: crate::profile::Profile,
     pub errors: Vec<String>,
     pub unsupported: Vec<String>,
+    pub loop_sources: HashMap<String, String>,
     pub template_path: String,
 }
 
@@ -81,7 +82,8 @@ pub fn render_page(
         }
     }
     let unsupported = r.unsupported.iter().cloned().collect();
-    Ok(PageResult { html, errors: r.errors.clone(), unsupported, profile: r.profile, template_path })
+    let loop_sources = std::mem::take(&mut r.loop_sources);
+    Ok(PageResult { html, errors: r.errors.clone(), unsupported, loop_sources, profile: r.profile, template_path })
 }
 
 fn handle_of(v: &Value) -> String {

@@ -53,6 +53,8 @@ pub struct Renderer<'t> {
     pub(crate) translations: Value,
     /// `file:line` of a `for` tag → iterations, from calibration.
     pub loop_shapes: HashMap<String, usize>,
+    /// `file:line` of each loop rendered → the expression it iterates, for fitting the mock shop.
+    pub loop_sources: HashMap<String, String>,
     pub errors: Vec<String>,
     loaded: HashSet<Rc<str>>,
     /// Lists read from database-backed fields, kept alive so their addresses stay unique.
@@ -86,6 +88,7 @@ impl<'t> Renderer<'t> {
             containers: Vec::new(),
             translations,
             loop_shapes: HashMap::new(),
+            loop_sources: HashMap::new(),
             errors: Vec::new(),
             loaded: HashSet::new(),
             bulk: HashMap::new(),
@@ -291,8 +294,14 @@ impl<'t> Renderer<'t> {
                 self.open_frame("Variable".to_string(), o.position.start);
                 self.count("node", 1.0);
                 let start = out.len();
+                let mut passthrough = false;
                 match &o.markup {
                     Markup::Node(v) => {
+                        // `{{ content_for_layout }}` hands over the page rendered already.
+                        if let Node::LiquidVariable(lv) = &**v {
+                            passthrough = lv.filters.is_empty()
+                                && matches!(&lv.expression, Node::VariableLookup(l) if l.name == Some("content_for_layout") && l.lookups.is_empty());
+                        }
                         let v = self.eval(v);
                         v.render_into(out);
                     }
@@ -302,7 +311,9 @@ impl<'t> Renderer<'t> {
                     }
                     _ => {}
                 }
-                self.count("output_byte", (out.len() - start) as f64);
+                if !passthrough {
+                    self.count("output_byte", (out.len() - start) as f64);
+                }
                 self.profile.close();
                 Flow::Normal
             }
@@ -675,6 +686,10 @@ impl<'t> Renderer<'t> {
         }
         // Calibrated shapes: make this loop run as often as it did on the real store.
         let key = format!("{}:{}", self.file_path(), self.line_of(tag.position.start));
+        if !self.loop_sources.contains_key(&key) {
+            let text = self.src(collection.position()).to_string();
+            self.loop_sources.insert(key.clone(), text);
+        }
         if let Some(&n) = self.loop_shapes.get(&key) {
             if items.is_empty() {
                 items = vec![Value::Nil; n];

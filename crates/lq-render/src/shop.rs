@@ -15,6 +15,8 @@ pub struct Knobs {
     pub products: usize,
     pub options: usize,
     pub values_per_option: usize,
+    /// Variants per product; 0 for every combination of option values.
+    pub variants_per_product: usize,
     pub images_per_product: usize,
     pub collections: usize,
     pub collection_size: usize,
@@ -36,6 +38,7 @@ impl Default for Knobs {
             products: 48,
             options: 2,
             values_per_option: 3,
+            variants_per_product: 0,
             images_per_product: 4,
             collections: 6,
             collection_size: 24,
@@ -63,7 +66,8 @@ impl Knobs {
     pub fn to_json(&self) -> J {
         json!({
             "products": self.products, "options": self.options,
-            "values_per_option": self.values_per_option, "images_per_product": self.images_per_product,
+            "values_per_option": self.values_per_option, "variants_per_product": self.variants_per_product,
+            "images_per_product": self.images_per_product,
             "collections": self.collections, "collection_size": self.collection_size,
             "metafields_per_product": self.metafields_per_product, "tags_per_product": self.tags_per_product,
             "cart_items": self.cart_items, "articles": self.articles, "countries": self.countries,
@@ -75,15 +79,15 @@ impl Knobs {
     pub fn from_json(m: &J) -> Knobs {
         let d = Knobs::default();
         let Knobs {
-            mut products, mut options, mut values_per_option, mut images_per_product, mut collections,
+            mut products, mut options, mut values_per_option, mut variants_per_product, mut images_per_product, mut collections,
             mut collection_size, mut metafields_per_product, mut tags_per_product, mut cart_items,
             mut articles, mut countries, mut languages, mut menu_links, mut menu_children, mut filters, ..
         } = d;
-        knob_fields!(m, products, options, values_per_option, images_per_product, collections,
+        knob_fields!(m, products, options, values_per_option, variants_per_product, images_per_product, collections,
             collection_size, metafields_per_product, tags_per_product, cart_items, articles, countries,
             languages, menu_links, menu_children, filters);
         Knobs {
-            products, options, values_per_option, images_per_product, collections, collection_size,
+            products, options, values_per_option, variants_per_product, images_per_product, collections, collection_size,
             metafields_per_product, tags_per_product, cart_items, articles, countries, languages,
             menu_links, menu_children, filters,
             logged_in: m.get("logged_in").and_then(J::as_bool).unwrap_or(false),
@@ -113,6 +117,9 @@ const WORDS: &[&str] = &[
     "Juniper", "Lumen", "Meadow", "Nomad", "Ridge", "Summit", "Tundra", "Willow",
 ];
 const KINDS: &[&str] = &["Parka", "Jacket", "Vest", "Hoodie", "Beanie", "Gloves", "Scarf", "Boots"];
+/// Shopify's limit on variants per product.
+const MAX_VARIANTS: usize = 2000;
+
 const OPTIONS: &[(&str, &[&str])] = &[
     ("Size", &["XS", "S", "M", "L", "XL", "XXL"]),
     ("Color", &["Black", "Navy", "Red", "Green", "White", "Grey"]),
@@ -139,21 +146,34 @@ fn product(i: usize, k: &Knobs) -> J {
     let handle = format!("{}-{}", title.to_lowercase().replace(' ', "-"), i + 1);
     let base = 19_900 + (i as i64 % 9) * 10_000;
     let images: Vec<J> = (1..=k.images_per_product.max(1)).map(|n| image(1000 * (i + 1) + n, &handle, n)).collect();
-    let opts: Vec<(&str, Vec<&str>)> = OPTIONS
+    let opts: Vec<(&str, Vec<String>)> = OPTIONS
         .iter()
         .take(k.options)
-        .map(|(name, vals)| (*name, vals.iter().take(k.values_per_option.max(1)).copied().collect()))
+        .map(|(name, vals)| {
+            // Past the named values, number them: "Size 7", "Size 8", ...
+            let values = (0..k.values_per_option.max(1))
+                .map(|n| vals.get(n).map_or_else(|| format!("{name} {}", n + 1), |v| v.to_string()))
+                .collect();
+            (*name, values)
+        })
         .collect();
     // Every combination of option values is a variant.
     let mut combos: Vec<Vec<&str>> = vec![vec![]];
     for (_, vals) in &opts {
-        combos = combos.into_iter().flat_map(|c| vals.iter().map(move |v| { let mut c = c.clone(); c.push(*v); c })).collect();
+        combos = combos.into_iter().flat_map(|c| vals.iter().map(move |v| { let mut c = c.clone(); c.push(v.as_str()); c })).collect();
+    }
+    // Not every combination exists on real products: keep an even spread of them.
+    let want = if k.variants_per_product == 0 { combos.len() } else { k.variants_per_product.min(combos.len()) };
+    let want = want.min(MAX_VARIANTS);
+    if want < combos.len() {
+        let step = combos.len() as f64 / want as f64;
+        combos = (0..want).map(|n| combos[(n as f64 * step) as usize].clone()).collect();
     }
     let variants: Vec<J> = combos
         .iter()
         .enumerate()
         .map(|(vi, combo)| {
-            let id = 40_000_000 + i * 100 + vi;
+            let id = 400_000_000 + i * 10_000 + vi;
             let title = if combo.is_empty() { "Default Title".to_string() } else { combo.join(" / ") };
             let price = base + (vi as i64 % 3) * 1000;
             json!({

@@ -242,8 +242,9 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
 - **Calibration.** The built-in costs are estimates. Capture a few real profiles once, with
   `shopify theme profile --url /products/x --json > real/product.json`, then run
   `lq profile calibrate product=real/product.json collection=real/collection.json`. lq matches frames by template and
-  line, takes each loop's real iteration count (`.lq/profile-shapes.json`), and fits the costs
-  (`.lq/profile-costs.json`). It reports how close the fit is per page. Calibrate against the files of the theme you
+  line, resizes the mock shop to the real catalogue from how often loops ran (variants, images, countries,
+  menus, ...: `.lq/shop.json`), takes the remaining loops' real iteration counts (`.lq/profile-shapes.json`), and
+  fits the costs (`.lq/profile-costs.json`). It reports how close the fit is per page. Calibrate against the files of the theme you
   profiled: JSON templates edited in the theme editor usually aren't in git, so pull them first
   (`shopify theme pull --theme <id>`), or lines won't match. Real profiles of the same code vary: one capture can
   run 1.5× slower than another. calibrate estimates each capture's speed from lines doing the same work and scales it
@@ -253,9 +254,12 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
 - `lq profile analyze real.json --path <theme>` gives the same report for a real profile, with each line's code taken
   from the theme, since Shopify's frames only name the tag.
 
-Rankings and before/after differences are the reliable part. Absolute times are estimates even after calibration: lq
-doesn't model Shopify's caches, database latency or app blocks, and the mock shop is only as close to the real catalogue
-as its sizes. Filters and tags lq doesn't model are listed with the report.
+On a real store, calibrated on two pages, lq's estimate of a third page's total came within 2–31%, after scaling out
+how fast each capture ran. Time per section and per snippet follows the real profile; time per individual line doesn't,
+since real line costs depend on data lq only approximates. So read the sections and snippets tables, and use
+`--compare` for regressions, where both sides share the same mock shop. Absolute times are estimates: lq doesn't model
+Shopify's caches, database latency or app blocks, and the mock shop is only as close to the real catalogue as its sizes.
+Filters and tags lq doesn't model are listed with the report.
 
 ## Parity
 

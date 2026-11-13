@@ -43,6 +43,126 @@ pub struct Calibration {
     pub pages: Vec<PageFit>,
     pub shape_changes: Vec<String>,
     pub unmatched: Vec<(String, f64)>,
+    /// Mock shop sizes changed to match the captures, as `name: old → new`.
+    pub knob_changes: Vec<String>,
+    /// The refitted mock shop, when its sizes changed.
+    pub shop_json: Option<serde_json::Value>,
+}
+
+/// Which mock shop size a loop over `expr` measures, if any.
+fn knob_for(expr: &str) -> Option<&'static str> {
+    let e = expr.split('|').next().unwrap_or("").trim();
+    let segs: Vec<&str> = e.split(['.', '[']).map(|s| s.trim_matches([']', '\'', '"', ' '])).filter(|s| !s.is_empty()).collect();
+    let last = *segs.last()?;
+    let parent = if segs.len() >= 2 { segs[segs.len() - 2] } else { "" };
+    let product_like = parent.contains("product") || parent == "item";
+    Some(match last {
+        "variants" if product_like => "variants",
+        "images" | "media" if product_like => "images_per_product",
+        "products" if parent.contains("collection") => "collection_size",
+        "options_with_values" if product_like => "options",
+        "values" if parent.contains("option") => "values_per_option",
+        "filters" => "filters",
+        // `link.links` is a submenu; `menu.links` or `linklists.main-menu.links` a top-level menu.
+        "links" if parent.ends_with("link") && !parent.ends_with("linklist") => "menu_children",
+        "links" => "menu_links",
+        "available_countries" => "countries",
+        "available_languages" => "languages",
+        "items" if parent == "cart" => "cart_items",
+        "tags" if product_like => "tags_per_product",
+        "articles" => "articles",
+        _ => return None,
+    })
+}
+
+type FittedShop = (Shop, serde_json::Value);
+
+/// Refits the mock shop's sizes from the captures' loop counts. Returns the new shop and its JSON
+/// when anything changed, and a line per change.
+fn fit_knobs(
+    theme: &Theme,
+    shop: &Shop,
+    samples: &[Sample],
+    prior: &CostModel,
+    limits: Limits,
+) -> Result<(Option<FittedShop>, Vec<String>), String> {
+    let mut knobs = shop.knobs.clone();
+    let mut current: Option<Shop> = None;
+    let mut changes = Vec::new();
+    // Two rounds: a richer shop can reach loops (colour swatches, submenus) the first one skipped.
+    for _round in 0..2 {
+        let mut seen: HashMap<&'static str, f64> = HashMap::new();
+        for s in samples {
+            let res = render_page(theme, current.as_ref().unwrap_or(shop), &s.page, prior, limits, &HashMap::new())?;
+            let sim = crate::speedscope::from_profile(&res.profile, prior);
+            let real_iters = loop_iterations(&s.real, is_loop);
+            let mut sim_keys: HashMap<Key, String> = HashMap::new();
+            for f in &sim.frames {
+                if is_loop(&f.name) {
+                    sim_keys.insert(match_key(f), format!("{}:{}", f.file, f.line));
+                }
+            }
+            for (key, loc) in &sim_keys {
+                let (Some(&n), Some(expr)) = (real_iters.get(key), res.loop_sources.get(loc)) else { continue };
+                if let Some(knob) = knob_for(expr) {
+                    // The largest per-call count: loops with `limit:` or filters only see part of a list.
+                    let e = seen.entry(knob).or_default();
+                    *e = e.max(n);
+                }
+            }
+        }
+        let mut next = knobs.clone();
+        let set = |v: f64, max: usize| (v.round() as usize).clamp(0, max);
+        if let Some(&o) = seen.get("options") {
+            next.options = set(o, 3);
+        }
+        if let Some(&v) = seen.get("values_per_option") {
+            next.values_per_option = set(v, 100).max(1);
+        }
+        if let Some(&v) = seen.get("variants") {
+            if !seen.contains_key("values_per_option") {
+                let opts = next.options.max(1) as f64;
+                next.values_per_option = set(v.powf(1.0 / opts).ceil(), 100).max(1);
+            }
+            next.variants_per_product = set(v, 2000).max(1);
+        }
+        for (knob, field, max) in [
+            ("images_per_product", &mut next.images_per_product as &mut usize, 250usize),
+            ("collection_size", &mut next.collection_size, 250),
+            ("filters", &mut next.filters, 20),
+            ("menu_links", &mut next.menu_links, 50),
+            ("menu_children", &mut next.menu_children, 50),
+            ("countries", &mut next.countries, 250),
+            ("languages", &mut next.languages, 50),
+            ("cart_items", &mut next.cart_items, 100),
+            ("tags_per_product", &mut next.tags_per_product, 100),
+            ("articles", &mut next.articles, 250),
+        ] {
+            if let Some(&v) = seen.get(knob) {
+                *field = set(v, max);
+            }
+        }
+        next.products = next.products.max(next.collection_size * 2);
+        let (a, b) = (knobs.to_json(), next.to_json());
+        if a == b {
+            break;
+        }
+        for (k, v) in b.as_object().unwrap() {
+            if a[k] != *v {
+                changes.retain(|c: &String| !c.starts_with(&format!("{k}: ")));
+                let was = shop.knobs.to_json()[k].clone();
+                changes.push(format!("{k}: {was} → {v}"));
+            }
+        }
+        knobs = next;
+        let json = crate::shop::generate(&knobs);
+        current = Some(Shop::from_json(&json));
+    }
+    if changes.is_empty() {
+        return Ok((None, changes));
+    }
+    let json = crate::shop::generate(&knobs);
+    Ok((Some((Shop::from_json(&json), json)), changes))
 }
 
 type Key = (String, u32);
@@ -164,6 +284,11 @@ pub fn calibrate(
     let mut shapes = shapes;
     let mut shape_changes = Vec::new();
 
+    // 0. Data sizes: refit the mock shop so its products, menus and lists are as big as the real
+    // store's, judging by how often loops over them ran.
+    let (fitted, knob_changes) = fit_knobs(theme, shop, samples, prior, limits)?;
+    let shop = fitted.as_ref().map_or(shop, |(s, _)| s);
+
     // 1. Shapes.
     for _round in 0..4 {
         let mut changed = false;
@@ -263,6 +388,19 @@ pub fn calibrate(
         .zip(&support)
         .map(|(d, &s)| if s >= min_support { 0.1 * d + 1e-9 } else { 20.0 * d + 1e-9 })
         .collect();
+    // How far each cost may move from where it started. Pure computation (filters, lookups,
+    // iterations, output) behaves alike on every store; database work and loading vary more. The
+    // bounds stop the fit from handing time it can't explain to whichever cheap op shares a line.
+    let (lo, hi): (Vec<f64>, Vec<f64>) = ops
+        .iter()
+        .zip(&p)
+        .map(|(op, &prior)| {
+            let wide = ["db:", "load:", "preload:", "global:"].iter().any(|x| op.starts_with(x))
+                || matches!(op.as_str(), "template_load" | "section" | "render" | "include" | "block");
+            let f = if wide { 20.0 } else { 10.0 };
+            (prior / f, (prior * f).max(1.0))
+        })
+        .unzip();
     let mut resid: Vec<f64> = rows.iter().map(|(x, y)| (0..ops.len()).map(|j| col(x, j) * c[j]).sum::<f64>() - y).collect();
     for _sweep in 0..300 {
         let mut moved = 0.0f64;
@@ -278,7 +416,7 @@ pub fn calibrate(
                     num -= xj * (resid[i] - xj * c[j]);
                 }
             }
-            let new = (num / (diag[j] + lambda[j])).max(0.0);
+            let new = (num / (diag[j] + lambda[j])).clamp(lo[j], hi[j]);
             let delta = new - c[j];
             if delta != 0.0 {
                 for (i, (x, _)) in rows.iter().enumerate() {
@@ -330,7 +468,8 @@ pub fn calibrate(
     let mut unmatched: Vec<(String, f64)> = unmatched_acc.into_iter().collect();
     unmatched.sort_by(|a, b| b.1.total_cmp(&a.1));
     unmatched.truncate(15);
-    Ok(Calibration { model, shapes, pages, shape_changes, unmatched })
+    let shop_json = fitted.map(|(_, j)| j);
+    Ok(Calibration { model, shapes, pages, shape_changes, unmatched, knob_changes, shop_json })
 }
 
 pub fn report(c: &Calibration) -> String {
@@ -353,6 +492,12 @@ pub fn report(c: &Calibration) -> String {
     if c.pages.len() > 1 {
         let _ = writeln!(o, "\nspeed: how fast each capture ran against the first, from lines doing the same work. Times are\nscaled by it, as captures of the same code vary.");
     }
+    if !c.knob_changes.is_empty() {
+        let _ = writeln!(o, "\nMock shop sizes taken from the real profiles' loops:");
+        for k in &c.knob_changes {
+            let _ = writeln!(o, "  {k}");
+        }
+    }
     if !c.shape_changes.is_empty() {
         let _ = writeln!(o, "\nLoop counts taken from the real profiles:");
         for s in c.shape_changes.iter().take(20) {
@@ -374,6 +519,19 @@ pub fn report(c: &Calibration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loops_map_to_shop_sizes() {
+        assert_eq!(knob_for("product.variants"), Some("variants"));
+        assert_eq!(knob_for("card_product.media"), Some("images_per_product"));
+        assert_eq!(knob_for("collection.products"), Some("collection_size"));
+        assert_eq!(knob_for("option.values"), Some("values_per_option"));
+        assert_eq!(knob_for("link.links"), Some("menu_children"));
+        assert_eq!(knob_for("section.settings.menu.links"), Some("menu_links"));
+        assert_eq!(knob_for("linklists['main-menu'].links"), Some("menu_links"));
+        assert_eq!(knob_for("localization.available_countries | sort: 'name'"), Some("countries"));
+        assert_eq!(knob_for("section.blocks"), None);
+    }
 
     #[test]
     fn spearman_ranks() {

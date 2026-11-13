@@ -38,9 +38,12 @@ Options:
   -h, --help            Print this help
 
 init writes <path>/.lq/shop.json, a mock shop to edit or resize. Sizes (with --set):
-  products, options, values_per_option, images_per_product, collections, collection_size,
-  metafields_per_product, tags_per_product, cart_items, articles, countries, languages,
-  menu_links, menu_children, filters, logged_in
+  products, options, values_per_option, variants_per_product (0: every combination),
+  images_per_product, collections, collection_size, metafields_per_product, tags_per_product,
+  cart_items, articles, countries, languages, menu_links, menu_children, filters, logged_in
+
+calibrate also refits these sizes from how often the real profiles' loops ran, and rewrites
+<path>/.lq/shop.json (keeping the old one as shop.json.bak).
 
 calibrate reads real profiles, captured once with
   shopify theme profile --url <path> --json > real/product.json
@@ -419,7 +422,19 @@ fn run_calibrate(a: &Args) -> Result<i32, String> {
     let shapes: serde_json::Map<String, serde_json::Value> = shapes.into_iter().map(|(k, v)| (k.clone(), serde_json::json!(v))).collect();
     let shapes_path = dir.join("profile-shapes.json");
     std::fs::write(&shapes_path, serde_json::to_string_pretty(&shapes).unwrap() + "\n").map_err(|e| format!("{}: {e}", shapes_path.display()))?;
-    println!("\nwrote {} and {}", costs.display(), shapes_path.display());
+    let mut wrote = vec![costs.display().to_string(), shapes_path.display().to_string()];
+    if let Some(json) = &c.shop_json {
+        let path = a.shop.clone().unwrap_or_else(|| dir.join("shop.json"));
+        if path.exists() {
+            let backup = path.with_extension("json.bak");
+            std::fs::copy(&path, &backup).map_err(|e| format!("{}: {e}", backup.display()))?;
+            wrote.push(format!("{} (the old one is {})", path.display(), backup.display()));
+        } else {
+            wrote.push(path.display().to_string());
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(json).unwrap() + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    println!("\nwrote {}", wrote.join(", "));
     Ok(0)
 }
 
