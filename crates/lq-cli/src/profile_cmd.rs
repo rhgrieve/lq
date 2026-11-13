@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 const HELP: &str = "\
 Usage: lq profile [options]
        lq profile init [--path <theme>] [--set <name>=<value>]... [--force]
-       lq profile calibrate [--path <theme>] <page>=<speedscope.json>...
+       lq profile calibrate [--path <theme>] [--dry-run] <page>=<speedscope.json>...
        lq profile analyze <speedscope.json>
 
 Estimates how long Shopify's renderer spends executing a page's Liquid, without a store or a
@@ -63,6 +63,7 @@ struct Args {
     max_nodes: u64,
     sets: Vec<String>,
     force: bool,
+    dry_run: bool,
     positional: Vec<String>,
 }
 
@@ -82,6 +83,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         max_nodes: Limits::default().max_nodes,
         sets: Vec::new(),
         force: false,
+        dry_run: false,
         positional: Vec::new(),
     };
     let mut it = args.iter();
@@ -112,6 +114,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--max-nodes" => a.max_nodes = value("--max-nodes")?.parse().map_err(|_| "--max-nodes needs a number")?,
             "--set" => a.sets.push(value("--set")?),
             "--force" => a.force = true,
+            "--dry-run" => a.dry_run = true,
             f if f.starts_with('-') => return Err(format!("unknown option {f}")),
             _ => a.positional.push(arg.clone()),
         }
@@ -403,6 +406,10 @@ fn run_calibrate(a: &Args) -> Result<i32, String> {
     }
     let c = calibrate::calibrate(&theme, &shop, &samples, &model, limits(a), load_shapes(a))?;
     print!("{}", calibrate::report(&c));
+    if a.dry_run {
+        println!("\n--dry-run: nothing written. \"before\" is the current costs on these pages.");
+        return Ok(0);
+    }
     let dir = lq_dir(a);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let costs = a.costs.clone().unwrap_or_else(|| dir.join("profile-costs.json"));

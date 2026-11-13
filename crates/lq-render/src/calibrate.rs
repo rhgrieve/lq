@@ -31,6 +31,10 @@ pub struct PageFit {
     /// Share of the real profile's own time on lines lq also rendered.
     pub matched_share: f64,
     pub spearman: f64,
+    /// The same, with the costs calibration started from.
+    pub spearman_before: f64,
+    /// How fast this capture ran against the first, from lines doing the same work in both.
+    pub speed: f64,
 }
 
 pub struct Calibration {
@@ -103,6 +107,42 @@ fn spearman(pairs: &[(f64, f64)]) -> f64 {
     if va == 0.0 || vb == 0.0 { f64::NAN } else { cov / (va * vb).sqrt() }
 }
 
+/// Calls per line, counting only frames that have a line.
+fn calls_by_key(tree: &Tree) -> HashMap<Key, u32> {
+    let mut m: HashMap<Key, u32> = HashMap::new();
+    for n in &tree.nodes {
+        let f = &tree.frames[n.frame as usize];
+        if f.line > 0 {
+            *m.entry(match_key(f)).or_default() += 1;
+        }
+    }
+    m
+}
+
+/// Shopify's renderer runs some requests faster than others: the same line with the same calls
+/// can take 1.5× as long in one capture as in another. Each capture's speed relative to the
+/// first is the median time ratio over such lines, or 1 when they share too few.
+fn capture_speeds(samples: &[Sample]) -> Vec<f64> {
+    let Some(first) = samples.first() else { return Vec::new() };
+    let (ref_self, ref_calls) = (self_by_key(&first.real), calls_by_key(&first.real));
+    samples
+        .iter()
+        .map(|s| {
+            let (own, calls) = (self_by_key(&s.real), calls_by_key(&s.real));
+            let mut ratios: Vec<f64> = ref_self
+                .iter()
+                .filter(|(k, v)| k.1 > 0 && **v >= 200.0 && calls.get(*k) == ref_calls.get(*k))
+                .filter_map(|(k, v)| own.get(k).filter(|o| **o > 0.0).map(|o| o / v))
+                .collect();
+            if ratios.len() < 10 {
+                return 1.0;
+            }
+            ratios.sort_by(f64::total_cmp);
+            ratios[ratios.len() / 2]
+        })
+        .collect()
+}
+
 /// Own time per matched line, summed over the tree.
 fn self_by_key(tree: &Tree) -> HashMap<Key, f64> {
     let keys = attribution(tree);
@@ -161,7 +201,9 @@ pub fn calibrate(
     let mut unmatched_acc: HashMap<String, f64> = HashMap::new();
     let mut sims = Vec::new();
     let mut totals: Vec<(HashMap<String, f64>, f64)> = Vec::new();
-    for s in samples {
+    let speeds = capture_speeds(samples);
+    for (si, s) in samples.iter().enumerate() {
+        let speed = speeds[si];
         let res = render_page(theme, shop, &s.page, prior, limits, &shapes)?;
         let p = &res.profile;
         let keys = attribution(&crate::speedscope::from_profile(p, prior));
@@ -175,7 +217,7 @@ pub fn calibrate(
         let real = self_by_key(&s.real);
         for (key, y) in &real {
             match counts.get(key) {
-                Some(x) => rows.push((x.clone(), *y)),
+                Some(x) => rows.push((x.clone(), *y / speed)),
                 None => {
                     // Frames lq never rendered: app blocks, Shopify's own wrappers, untouched branches.
                     let f = s.real.frames.iter().find(|f| &match_key(f) == key);
@@ -195,7 +237,7 @@ pub fn calibrate(
                 *all.entry(op.clone()).or_default() += c;
             }
         }
-        totals.push((all, s.real.total_us()));
+        totals.push((all, s.real.total_us() / speed));
         sims.push((res.profile, counts));
     }
 
@@ -264,21 +306,25 @@ pub fn calibrate(
         let real = self_by_key(&s.real);
         let real_total: f64 = real.values().sum();
         let matched: f64 = real.iter().filter(|(k, _)| counts.contains_key(*k)).map(|(_, v)| v).sum();
-        let sim_tree = crate::speedscope::from_profile(profile, &model);
-        let sim_self = self_by_key(&sim_tree);
         // Every line with at least 0.1% of the real time; one lq didn't render counts as zero.
-        let pairs: Vec<(f64, f64)> = real
-            .iter()
-            .filter(|(k, v)| **v >= 0.001 * real_total && k.1 > 0)
-            .map(|(k, v)| (*v, sim_self.get(k).copied().unwrap_or(0.0)))
-            .collect();
+        let rho = |m: &CostModel| {
+            let sim_self = self_by_key(&crate::speedscope::from_profile(profile, m));
+            let pairs: Vec<(f64, f64)> = real
+                .iter()
+                .filter(|(k, v)| **v >= 0.001 * real_total && k.1 > 0)
+                .map(|(k, v)| (*v, sim_self.get(k).copied().unwrap_or(0.0)))
+                .collect();
+            spearman(&pairs)
+        };
         pages.push(PageFit {
             label: s.label.clone(),
             real_ms: s.real.total_us() / 1000.0,
-            before_ms: before[i] / 1000.0,
-            after_ms: profile.total(&model) / 1000.0,
+            before_ms: before[i] * speeds[i] / 1000.0,
+            after_ms: profile.total(&model) * speeds[i] / 1000.0,
             matched_share: if real_total > 0.0 { matched / real_total } else { 0.0 },
-            spearman: spearman(&pairs),
+            spearman: rho(&model),
+            spearman_before: rho(prior),
+            speed: speeds[i],
         });
     }
     let mut unmatched: Vec<(String, f64)> = unmatched_acc.into_iter().collect();
@@ -289,18 +335,23 @@ pub fn calibrate(
 
 pub fn report(c: &Calibration) -> String {
     let mut o = String::new();
-    let _ = writeln!(o, "{:<40}{:>10}{:>10}{:>10}{:>10}{:>8}", "page", "real ms", "before", "after", "matched", "rank ρ");
+    let _ = writeln!(o, "{:<40}{:>8}{:>10}{:>10}{:>10}{:>10}{:>10}{:>8}", "page", "speed", "real ms", "before", "after", "matched", "ρ before", "ρ after");
     for p in &c.pages {
         let _ = writeln!(
             o,
-            "{:<40}{:>10.1}{:>10.1}{:>10.1}{:>9.0}%{:>8}",
+            "{:<40}{:>8.2}{:>10.1}{:>10.1}{:>10.1}{:>9.0}%{:>10}{:>8}",
             p.label,
+            p.speed,
             p.real_ms,
             p.before_ms,
             p.after_ms,
             p.matched_share * 100.0,
+            if p.spearman_before.is_nan() { "-".to_string() } else { format!("{:.2}", p.spearman_before) },
             if p.spearman.is_nan() { "-".to_string() } else { format!("{:.2}", p.spearman) }
         );
+    }
+    if c.pages.len() > 1 {
+        let _ = writeln!(o, "\nspeed: how fast each capture ran against the first, from lines doing the same work. Times are\nscaled by it, as captures of the same code vary.");
     }
     if !c.shape_changes.is_empty() {
         let _ = writeln!(o, "\nLoop counts taken from the real profiles:");

@@ -55,6 +55,8 @@ pub struct Renderer<'t> {
     pub loop_shapes: HashMap<String, usize>,
     pub errors: Vec<String>,
     loaded: HashSet<Rc<str>>,
+    /// Lists read from database-backed fields, kept alive so their addresses stay unique.
+    bulk: HashMap<usize, Rc<Vec<Value>>>,
     /// Filters and tags lq passed through without modelling them.
     pub unsupported: std::collections::BTreeSet<String>,
     pub layout: Option<String>,
@@ -86,6 +88,7 @@ impl<'t> Renderer<'t> {
             loop_shapes: HashMap::new(),
             errors: Vec::new(),
             loaded: HashSet::new(),
+            bulk: HashMap::new(),
             unsupported: Default::default(),
             layout: None,
             nodes: 0,
@@ -627,9 +630,24 @@ impl<'t> Renderer<'t> {
         Flow::Normal
     }
 
+    fn is_bulk(&self, v: &Value) -> bool {
+        matches!(v, Value::Array(a) if self.bulk.contains_key(&(Rc::as_ptr(a) as usize)))
+    }
+
     fn loop_items(&mut self, tag: &'t LiquidTag<'t>, collection: &'t Node<'t>, args: &'t [Node<'t>], reversed: bool) -> Vec<Value> {
         let coll = self.eval(collection);
         let mut items = coll.to_items();
+        // Iterating a list from the database (a collection's products, search results) loads its
+        // items in one batch, at the loop, rather than one at a time on first read.
+        if self.is_bulk(&coll) {
+            for item in &items {
+                if let Value::Object(o) = item {
+                    if self.model.loads(&o.ty) && self.db_seen.insert((o.id, Rc::from("\0load"))) {
+                        self.count(&format!("preload:{}", o.ty), 1.0);
+                    }
+                }
+            }
+        }
         let mut offset = 0usize;
         let mut limit = None;
         for a in args {
@@ -886,6 +904,7 @@ impl<'t> Renderer<'t> {
             Value::Object(o) => o.get("__count").and_then(Value::as_int).map_or(all.len(), |c| c as usize),
             _ => all.len(),
         };
+        let bulk = self.is_bulk(&coll);
         let page: Vec<Value> = all.into_iter().take(size).collect();
         let pages = total.div_ceil(size).max(1);
         let mut po = Object::new("paginate");
@@ -915,7 +934,11 @@ impl<'t> Renderer<'t> {
             po.set("next", Value::Nil);
         }
         let key = self.src(p.collection.position()).to_string();
-        self.paginate.push((key, Value::array(page)));
+        let page = Rc::new(page);
+        if bulk {
+            self.bulk.insert(Rc::as_ptr(&page) as usize, page.clone());
+        }
+        self.paginate.push((key, Value::Array(page)));
         let mut scope = Scope::new();
         scope.insert(Rc::from("paginate"), Value::object(po));
         self.scopes.push(scope);
@@ -956,13 +979,17 @@ impl<'t> Renderer<'t> {
                 if self.model.loads(&o.ty) && self.db_seen.insert((o.id, Rc::from("\0load"))) {
                     self.count(&format!("load:{}", o.ty), 1.0);
                 }
-                if let Some(op) = self.model.db_op(&o.ty, &k) {
+                let db = self.model.db_op(&o.ty, &k);
+                if let Some(op) = &db {
                     let seen_key = (o.id, Rc::from(k.as_str()));
                     if self.db_seen.insert(seen_key) {
-                        self.count(&op, 1.0);
+                        self.count(op, 1.0);
                     }
                 }
                 if let Some(x) = o.get(&k) {
+                    if let (Some(_), Value::Array(a)) = (&db, x) {
+                        self.bulk.insert(Rc::as_ptr(a) as usize, a.clone());
+                    }
                     return x.clone();
                 }
                 match k.as_str() {

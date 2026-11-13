@@ -245,7 +245,10 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
   line, takes each loop's real iteration count (`.lq/profile-shapes.json`), and fits the costs
   (`.lq/profile-costs.json`). It reports how close the fit is per page. Calibrate against the files of the theme you
   profiled: JSON templates edited in the theme editor usually aren't in git, so pull them first
-  (`shopify theme pull --theme <id>`), or lines won't match. Keep real profiles out of version control if
+  (`shopify theme pull --theme <id>`), or lines won't match. Real profiles of the same code vary: one capture can
+  run 1.5× slower than another. calibrate estimates each capture's speed from lines doing the same work and scales it
+  out, and capturing a page more than once helps. `--dry-run` reports how the current costs fit some captures
+  without changing anything, which checks them against pages they weren't fitted on. Keep real profiles out of version control if
   they come from a client's store.
 - `lq profile analyze real.json --path <theme>` gives the same report for a real profile, with each line's code taken
   from the theme, since Shopify's frames only name the tag.
