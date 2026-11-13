@@ -161,7 +161,10 @@ impl<'t> Renderer<'t> {
         self.count("template", 1.0);
         if section_frame {
             self.open_plain("section", &name);
-            self.count("section", 1.0);
+            // Blocks render under a `section` frame too, but cost their own `block` op.
+            if name.starts_with("sections/") {
+                self.count("section", 1.0);
+            }
         }
         let ok = self.render_file(path, out);
         if section_frame {
