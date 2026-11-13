@@ -62,9 +62,11 @@ pub fn render_page(
                 other => other.as_str().unwrap_or("theme").to_string(),
             });
         }
+        r.open_plain("json_template", "");
         render_section_list(&mut r, &json, "template", &mut content);
+        r.profile.close();
     } else {
-        r.render_file(&template_path, &mut content);
+        r.render_template(&template_path, false, &mut content);
     }
 
     let layout = r.layout.clone().unwrap_or_else(|| "theme".into());
@@ -74,7 +76,7 @@ pub fn render_page(
     } else {
         r.set_global("content_for_layout", Value::str(&content));
         let path = format!("layout/{layout}.liquid");
-        if !r.render_file(&path, &mut html) {
+        if !r.render_template(&path, false, &mut html) {
             return Err(format!("the theme has no {path}"));
         }
     }
@@ -531,11 +533,25 @@ fn block_children(v: &Value) -> Vec<Value> {
 }
 
 /// Renders one section from template or group JSON.
-fn render_section(r: &mut Renderer<'_>, id: &str, data: &lq_json::Value, location: &str, index: usize, out: &mut String) {
+/// Sections from JSON render under a `raw_section` frame, which also holds resolving their
+/// settings; a `{% section %}` tag's doesn't.
+fn render_section(r: &mut Renderer<'_>, id: &str, data: &lq_json::Value, location: &str, index: usize, raw: bool, out: &mut String) {
     let ty = data.get("type").and_then(|t| t.as_str()).unwrap_or("").to_string();
     if ty.starts_with("_blocks") && r.theme.get(&format!("sections/{ty}.liquid")).is_none() {
         return;
     }
+    if raw {
+        let file = r.current_template();
+        r.open_plain("raw_section", &file);
+    }
+    render_section_inner(r, id, &ty, data, location, index, out);
+    if raw {
+        r.profile.close();
+    }
+}
+
+fn render_section_inner(r: &mut Renderer<'_>, id: &str, ty: &str, data: &lq_json::Value, location: &str, index: usize, out: &mut String) {
+    let ty = ty.to_string();
     let path = format!("sections/{ty}.liquid");
     let schema = schema(r.theme, &path);
     let defs = schema_settings(schema.as_ref());
@@ -566,16 +582,9 @@ fn render_section_value(r: &mut Renderer<'_>, ty: &str, id: &str, section: Value
     let saved_scopes = std::mem::replace(&mut r.scopes, vec![Scope::new()]);
     let saved_section = r.globals.insert(Rc::from("section"), section.clone());
     r.containers.push(Container { section: section.clone(), blocks });
-    // The section frame: lq's own, as a profile root, so time per section reads directly.
-    let prev_file = r.file.take();
-    r.file = r.theme.get(&path);
-    r.open_frame(format!("section {id} ({ty})"), 0);
-    r.file = prev_file;
-    r.count("section", 1.0);
     out.push_str(&format!("<div id=\"shopify-section-{id}\" class=\"shopify-section\">"));
-    let _ = r.with_depth(|r| r.render_file(&path, out));
+    let _ = r.with_depth(|r| r.render_template(&path, true, out));
     out.push_str("</div>");
-    r.profile.close();
     r.containers.pop();
     match saved_section {
         Some(s) => r.globals.insert(Rc::from("section"), s),
@@ -586,7 +595,7 @@ fn render_section_value(r: &mut Renderer<'_>, ty: &str, id: &str, section: Value
 
 fn render_section_list(r: &mut Renderer<'_>, json: &lq_json::Value, location: &str, out: &mut String) {
     for (i, (id, data)) in ordered(json, "sections", "order").into_iter().enumerate() {
-        render_section(r, &id, data, location, i, out);
+        render_section(r, &id, data, location, i, true, out);
     }
 }
 
@@ -598,7 +607,10 @@ pub(crate) fn render_section_group(r: &mut Renderer<'_>, name: &str, out: &mut S
         return;
     };
     let location = json.get("type").and_then(|t| t.as_str()).unwrap_or(name).to_string();
+    let file = r.current_template();
+    r.open_plain("json_section_group", &file);
     render_section_list(r, &json, &location, out);
+    r.profile.close();
 }
 
 /// `{% section 'name' %}`: a static section, with settings from settings_data.json.
@@ -615,7 +627,7 @@ pub(crate) fn render_static_section(r: &mut Renderer<'_>, name: &str, out: &mut 
         }
         _ => lq_json::Value::Object(json),
     };
-    render_section(r, name, &data, "static", 0, out);
+    render_section(r, name, &data, "static", 0, false, out);
 }
 
 /// `{% content_for 'blocks' %}` and `{% content_for 'block', type: ..., id: ... %}`.
@@ -647,46 +659,63 @@ pub(crate) fn render_content_for(r: &mut Renderer<'_>, kind: &str, args: &[(Stri
         if ty.starts_with('@') {
             continue;
         }
-        let path = format!("blocks/{ty}.liquid");
-        if r.theme.get(&path).is_none() {
-            r.error(offset, &format!("Could not find block {path}"), out);
+        render_block_with(r, &ty, block, args, offset, out);
+    }
+}
+
+/// Renders one block: its file from `blocks/`, with `block` set. App blocks (`@app`) aren't in
+/// the theme, so they render nothing.
+pub(crate) fn render_block_value(r: &mut Renderer<'_>, ty: &str, block: Value, offset: u32, out: &mut String) {
+    if r.theme.get(&format!("blocks/{ty}.liquid")).is_none() {
+        return;
+    }
+    render_block_with(r, ty, block, &[], offset, out);
+}
+
+fn render_block_with(r: &mut Renderer<'_>, ty: &str, block: Value, args: &[(String, Value)], offset: u32, out: &mut String) {
+    if ty.starts_with('@') {
+        return;
+    }
+    let Some(container) = r.containers.last().cloned() else { return };
+    let path = format!("blocks/{ty}.liquid");
+    if r.theme.get(&path).is_none() {
+        r.error(offset, &format!("Could not find block {path}"), out);
+        return;
+    }
+    r.count("block", 1.0);
+    let children = block_children(&block);
+    let saved_scopes = std::mem::replace(&mut r.scopes, vec![Scope::new()]);
+    let saved_block = r.globals.insert(Rc::from("block"), block.clone());
+    r.containers.push(Container { section: container.section.clone(), blocks: children });
+    let mut args_scope = Scope::new();
+    let mut closest = Object::new("");
+    let outer = r.lookup_var("closest");
+    if let Value::Object(o) = &outer {
+        for (k, v) in o.fields.iter() {
+            closest.set(k, v.clone());
+        }
+    }
+    for (k, v) in args {
+        if k == "type" || k == "id" {
             continue;
         }
-        r.count("block", 1.0);
-        let children = block_children(&block);
-        let saved_scopes = std::mem::replace(&mut r.scopes, vec![Scope::new()]);
-        let saved_block = r.globals.insert(Rc::from("block"), block.clone());
-        r.containers.push(Container { section: container.section.clone(), blocks: children });
-        let mut args_scope = Scope::new();
-        let mut closest = Object::new("");
-        let outer = r.lookup_var("closest");
-        if let Value::Object(o) = &outer {
-            for (k, v) in o.fields.iter() {
-                closest.set(k, v.clone());
+        // `closest.product: product` sets what `{{ closest.product }}` dynamic sources read.
+        match k.strip_prefix("closest.") {
+            Some(name) => closest.set(name, v.clone()),
+            None => {
+                args_scope.insert(Rc::from(k.as_str()), v.clone());
             }
         }
-        for (k, v) in args {
-            if k == "type" || k == "id" {
-                continue;
-            }
-            // `closest.product: product` sets what `{{ closest.product }}` dynamic sources read.
-            match k.strip_prefix("closest.") {
-                Some(name) => closest.set(name, v.clone()),
-                None => {
-                    args_scope.insert(Rc::from(k.as_str()), v.clone());
-                }
-            }
-        }
-        if !closest.fields.is_empty() {
-            args_scope.insert(Rc::from("closest"), Value::object(closest));
-        }
-        r.scopes = vec![args_scope];
-        let _ = r.with_depth(|r| r.render_file(&path, out));
-        r.containers.pop();
-        match saved_block {
-            Some(b) => r.globals.insert(Rc::from("block"), b),
-            None => r.globals.remove("block"),
-        };
-        r.scopes = saved_scopes;
     }
+    if !closest.fields.is_empty() {
+        args_scope.insert(Rc::from("closest"), Value::object(closest));
+    }
+    r.scopes = vec![args_scope];
+    let _ = r.with_depth(|r| r.render_template(&path, true, out));
+    r.containers.pop();
+    match saved_block {
+        Some(b) => r.globals.insert(Rc::from("block"), b),
+        None => r.globals.remove("block"),
+    };
+    r.scopes = saved_scopes;
 }

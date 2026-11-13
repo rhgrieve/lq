@@ -151,14 +151,15 @@ impl Profile {
             if i > 0 {
                 frames.push(',');
             }
-            let _ = write!(
-                frames,
-                "{{\"name\":{},\"file\":{},\"line\":{},\"col\":{}}}",
-                json_str(&f.name),
-                json_str(&f.file),
-                f.line,
-                f.col
-            );
+            // As Shopify writes them: wrapper frames have no line, and filter frames no file.
+            let _ = write!(frames, "{{\"name\":{}", json_str(&f.name));
+            if !f.file.is_empty() {
+                let _ = write!(frames, ",\"file\":{}", json_str(&f.file));
+            }
+            if f.line > 0 {
+                let _ = write!(frames, ",\"line\":{}", f.line);
+            }
+            frames.push('}');
         }
         format!(
             "{{\"$schema\":\"https://www.speedscope.app/file-format-schema.json\",\"exporter\":\"lq {}\",\

@@ -12,7 +12,7 @@ use crate::cost::CostModel;
 use crate::interp::Limits;
 use crate::page::{render_page, PageRequest};
 use crate::shop::Shop;
-use crate::speedscope::{match_key, Tree};
+use crate::speedscope::{attribution, match_key, Tree};
 use crate::theme::Theme;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -43,6 +43,9 @@ pub struct Calibration {
 
 type Key = (String, u32);
 
+/// Lines an op must appear on before its cost is fitted freely.
+const MIN_SUPPORT: usize = 8;
+
 /// Average iterations per call of each loop, from a tree: the most frequent direct child line.
 fn loop_iterations(tree: &Tree, is_loop: impl Fn(&str) -> bool) -> HashMap<Key, f64> {
     let mut acc: HashMap<Key, (f64, f64)> = HashMap::new();
@@ -64,7 +67,7 @@ fn loop_iterations(tree: &Tree, is_loop: impl Fn(&str) -> bool) -> HashMap<Key, 
 }
 
 fn is_loop(name: &str) -> bool {
-    name.starts_with("for ") || name.starts_with("tablerow ")
+    matches!(name, "For" | "TableRow")
 }
 
 fn spearman(pairs: &[(f64, f64)]) -> f64 {
@@ -102,9 +105,10 @@ fn spearman(pairs: &[(f64, f64)]) -> f64 {
 
 /// Own time per matched line, summed over the tree.
 fn self_by_key(tree: &Tree) -> HashMap<Key, f64> {
+    let keys = attribution(tree);
     let mut m: HashMap<Key, f64> = HashMap::new();
-    for n in &tree.nodes {
-        *m.entry(match_key(&tree.frames[n.frame as usize])).or_default() += n.self_us;
+    for (i, n) in tree.nodes.iter().enumerate() {
+        *m.entry(keys[i].clone()).or_default() += n.self_us;
     }
     m
 }
@@ -126,7 +130,7 @@ pub fn calibrate(
         for s in samples {
             let res = render_page(theme, shop, &s.page, prior, limits, &shapes)?;
             let sim = crate::speedscope::from_profile(&res.profile, prior);
-            let real_iters = loop_iterations(&s.real, |_| true);
+            let real_iters = loop_iterations(&s.real, is_loop);
             let sim_iters = loop_iterations(&sim, is_loop);
             // Loop frames in lq's tree, keyed back to their full file path for `loop_shapes`.
             let mut sim_files: HashMap<Key, String> = HashMap::new();
@@ -159,9 +163,10 @@ pub fn calibrate(
     for s in samples {
         let res = render_page(theme, shop, &s.page, prior, limits, &shapes)?;
         let p = &res.profile;
+        let keys = attribution(&crate::speedscope::from_profile(p, prior));
         let mut counts: HashMap<Key, HashMap<String, f64>> = HashMap::new();
-        for n in &p.nodes {
-            let e = counts.entry(match_key(&p.frames[n.frame as usize])).or_default();
+        for (i, n) in p.nodes.iter().enumerate() {
+            let e = counts.entry(keys[i].clone()).or_default();
             for &(op, c) in &n.counts {
                 *e.entry(p.ops.name(op).to_string()).or_default() += c;
             }
@@ -173,7 +178,11 @@ pub fn calibrate(
                 None => {
                     // Frames lq never rendered: app blocks, Shopify's own wrappers, untouched branches.
                     let f = s.real.frames.iter().find(|f| &match_key(f) == key);
-                    let label = f.map(|f| format!("{}:{}  {}", f.file, f.line, f.name)).unwrap_or_default();
+                    let label = match f {
+                        Some(f) if f.line > 0 => format!("{}:{}  {}", f.file, f.line, f.name),
+                        _ if key.0.is_empty() => "(page wrappers: json_template, raw_section)".to_string(),
+                        _ => key.0.clone(),
+                    };
                     *unmatched_acc.entry(label).or_default() += y;
                 }
             }
@@ -188,7 +197,16 @@ pub fn calibrate(
     let mut c: Vec<f64> = ops.iter().map(|o| prior.coefficient(o)).collect();
     let p: Vec<f64> = c.clone();
     let diag: Vec<f64> = (0..ops.len()).map(|j| rows.iter().map(|(x, _)| col(x, j).powi(2)).sum()).collect();
-    let lambda: Vec<f64> = diag.iter().map(|d| 0.05 * d + 1e-9).collect();
+    // An op seen on only a few lines can't be told apart from whatever else those lines do, so
+    // it stays close to its current value; well-supported ops move freely.
+    // On a tiny profile every op is rare, so the bar scales down with the number of lines.
+    let min_support = MIN_SUPPORT.min((rows.len() / 3).max(1));
+    let support: Vec<usize> = (0..ops.len()).map(|j| rows.iter().filter(|(x, _)| col(x, j) != 0.0).count()).collect();
+    let lambda: Vec<f64> = diag
+        .iter()
+        .zip(&support)
+        .map(|(d, &s)| if s >= min_support { 0.1 * d + 1e-9 } else { 20.0 * d + 1e-9 })
+        .collect();
     let mut resid: Vec<f64> = rows.iter().map(|(x, y)| (0..ops.len()).map(|j| col(x, j) * c[j]).sum::<f64>() - y).collect();
     for _sweep in 0..300 {
         let mut moved = 0.0f64;

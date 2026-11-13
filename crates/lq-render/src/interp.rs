@@ -54,6 +54,7 @@ pub struct Renderer<'t> {
     /// `file:line` of a `for` tag → iterations, from calibration.
     pub loop_shapes: HashMap<String, usize>,
     pub errors: Vec<String>,
+    loaded: HashSet<Rc<str>>,
     /// Filters and tags lq passed through without modelling them.
     pub unsupported: std::collections::BTreeSet<String>,
     pub layout: Option<String>,
@@ -84,6 +85,7 @@ impl<'t> Renderer<'t> {
             translations,
             loop_shapes: HashMap::new(),
             errors: Vec::new(),
+            loaded: HashSet::new(),
             unsupported: Default::default(),
             layout: None,
             nodes: 0,
@@ -108,8 +110,45 @@ impl<'t> Renderer<'t> {
         f.source.get(pos.start as usize..pos.end as usize).unwrap_or("")
     }
 
+    /// The current template's name as Shopify reports it: the path without `.liquid`.
     fn file_path(&self) -> Rc<str> {
-        self.file.map(|f| f.path.clone()).unwrap_or_else(|| Rc::from(""))
+        match self.file {
+            Some(f) => match f.path.strip_suffix(".liquid") {
+                Some(name) => Rc::from(name),
+                None => f.path.clone(),
+            },
+            None => Rc::from(""),
+        }
+    }
+
+    /// Opens a frame with no line, as Shopify's wrapper frames are (`liquid_template`, `section`, ...).
+    pub(crate) fn open_plain(&mut self, name: &str, file: &str) {
+        self.profile.open(FrameKey { name: name.to_string(), file: Rc::from(file), line: 0, col: 0 });
+    }
+
+    pub(crate) fn current_template(&self) -> String {
+        self.file_path().to_string()
+    }
+
+    /// Renders a template under the frames Shopify opens for it: `liquid_template`, plus
+    /// `section` for section and block files.
+    pub(crate) fn render_template(&mut self, path: &str, section_frame: bool, out: &mut String) -> bool {
+        if self.theme.get(path).is_none() {
+            return false;
+        }
+        let name = path.strip_suffix(".liquid").unwrap_or(path).to_string();
+        self.open_plain("liquid_template", &name);
+        self.count("template", 1.0);
+        if section_frame {
+            self.open_plain("section", &name);
+            self.count("section", 1.0);
+        }
+        let ok = self.render_file(path, out);
+        if section_frame {
+            self.profile.close();
+        }
+        self.profile.close();
+        ok
     }
 
     pub(crate) fn line_of(&self, offset: u32) -> u32 {
@@ -118,8 +157,7 @@ impl<'t> Renderer<'t> {
 
     /// Prints a Liquid error inline, as Shopify does, and keeps rendering.
     pub(crate) fn error(&mut self, offset: u32, message: &str, out: &mut String) {
-        let template = self.file_path();
-        let template = template.strip_suffix(".liquid").unwrap_or(&template).to_string();
+        let template = self.file_path().to_string();
         let line = self.line_of(offset);
         let text = format!("Liquid error ({template} line {line}): {message}");
         self.count("error", 1.0);
@@ -134,8 +172,9 @@ impl<'t> Renderer<'t> {
     /// Renders a whole file. The caller opens any frame around it.
     pub fn render_file(&mut self, path: &str, out: &mut String) -> bool {
         let Some(file) = self.theme.get(path) else { return false };
-        if !file.is_parsed() {
-            self.count("partial_parse", 1.0);
+        // Shopify loads each template once per request; the first render of a file pays for it.
+        if self.loaded.insert(file.path.clone()) {
+            self.count("template_load", 1.0);
         }
         let doc = match file.doc() {
             Ok(d) => d,
@@ -235,17 +274,18 @@ impl<'t> Renderer<'t> {
                 flow
             }
             Node::LiquidTag(tag) => {
-                let raw = self.src(tag.markup_position).trim();
-                let name = if raw.is_empty() { tag.name.to_string() } else { format!("{} {raw}", tag.name) };
-                self.open_frame(name, tag.position.start);
+                // Inline comments aren't profiled.
+                if tag.name == "#" || tag.name == "comment" {
+                    return Flow::Normal;
+                }
+                let custom = self.open_tag_frames(tag.name, tag.position.start);
                 self.count("node", 1.0);
                 let flow = self.render_tag(tag, out);
-                self.profile.close();
+                self.close_tag_frames(custom);
                 flow
             }
             Node::LiquidVariableOutput(o) => {
-                let raw = self.src(o.markup_position).trim().to_string();
-                self.open_frame(raw, o.position.start);
+                self.open_frame("Variable".to_string(), o.position.start);
                 self.count("node", 1.0);
                 let start = out.len();
                 match &o.markup {
@@ -264,7 +304,10 @@ impl<'t> Renderer<'t> {
                 Flow::Normal
             }
             Node::LiquidRawTag(raw) => {
-                self.open_frame(raw.name.to_string(), raw.position.start);
+                if raw.name == "comment" {
+                    return Flow::Normal;
+                }
+                let custom = self.open_tag_frames(raw.name, raw.position.start);
                 self.count("node", 1.0);
                 match raw.name {
                     "raw" => {
@@ -281,10 +324,10 @@ impl<'t> Renderer<'t> {
                             out.push_str("</style>");
                         }
                     }
-                    // schema, stylesheet and javascript compile to assets; comment and doc print nothing.
+                    // schema, stylesheet and javascript compile to assets; doc prints nothing.
                     _ => {}
                 }
-                self.profile.close();
+                self.close_tag_frames(custom);
                 Flow::Normal
             }
             Node::LiquidErrorNode(e) => {
@@ -293,6 +336,47 @@ impl<'t> Renderer<'t> {
                 Flow::Normal
             }
             _ => Flow::Normal,
+        }
+    }
+
+    /// Opens a tag's frame, named as the Liquid gem names it: the tag class (`Assign`, `For`,
+    /// `Render`, ...) for standard tags, and Shopify's own tags by name under a `Custom` frame.
+    /// Returns whether a `Custom` frame was opened.
+    fn open_tag_frames(&mut self, tag: &str, offset: u32) -> bool {
+        let class = match tag {
+            "assign" => "Assign",
+            "capture" => "Capture",
+            "case" => "Case",
+            "cycle" => "Cycle",
+            "decrement" => "Decrement",
+            "increment" => "Increment",
+            "echo" => "Echo",
+            "for" => "For",
+            "if" => "If",
+            "unless" => "Unless",
+            "ifchanged" => "Ifchanged",
+            "include" => "Include",
+            "render" => "Render",
+            "raw" => "Raw",
+            "tablerow" => "TableRow",
+            "break" => "Break",
+            "continue" => "Continue",
+            "doc" => "Doc",
+            _ => {
+                let file = self.file_path();
+                self.open_plain("Custom", &file);
+                self.open_frame(tag.to_string(), offset);
+                return true;
+            }
+        };
+        self.open_frame(class.to_string(), offset);
+        false
+    }
+
+    fn close_tag_frames(&mut self, custom: bool) {
+        self.profile.close();
+        if custom {
+            self.profile.close();
         }
     }
 
@@ -651,7 +735,17 @@ impl<'t> Renderer<'t> {
     }
 
     fn render_partial(&mut self, tag: &'t LiquidTag<'t>, r: &'t lq_syntax::RenderMarkup<'t>, out: &mut String) {
-        let name = self.eval(&r.snippet).render();
+        let target = self.eval(&r.snippet);
+        // `{% render block %}` renders an app or theme block, not a snippet.
+        if let Value::Object(o) = &target {
+            if &*o.ty == "block" {
+                let ty = o.get("type").map(|t| t.render()).unwrap_or_default();
+                let block = target.clone();
+                crate::page::render_block_value(self, &ty, block, tag.position.start, out);
+                return;
+            }
+        }
+        let name = target.render();
         let path = format!("snippets/{name}.liquid");
         if self.theme.get(&path).is_none() {
             self.error(tag.position.start, &format!("Could not find asset {path}"), out);
@@ -702,7 +796,7 @@ impl<'t> Renderer<'t> {
             } else {
                 self.scopes.push(scope);
             }
-            self.render_file(&path, out);
+            self.render_template(&path, false, out);
             if !isolated {
                 self.scopes.pop();
             }
@@ -840,6 +934,10 @@ impl<'t> Renderer<'t> {
     }
 
     pub(crate) fn lookup_var(&mut self, name: &str) -> Value {
+        // Objects Shopify builds per request when first read.
+        if matches!(name, "content_for_header" | "content_for_layout") && self.scopes.iter().all(|s| !s.contains_key(name)) {
+            self.count(&format!("global:{name}"), 1.0);
+        }
         for scope in self.scopes.iter().rev() {
             if let Some(v) = scope.get(name) {
                 return v.clone();
@@ -1000,8 +1098,11 @@ impl<'t> Renderer<'t> {
                                 other => args.push(self.eval(other)),
                             }
                         }
-                        self.count(&format!("filter:{}", f.name), 1.0);
+                        let op = format!("filter:{}", f.name);
+                        self.open_plain(&op, "");
+                        self.count(&op, 1.0);
                         value = crate::filters::apply(self, f.name, value, args, kwargs);
+                        self.profile.close();
                     }
                 }
                 value

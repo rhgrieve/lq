@@ -130,6 +130,13 @@ impl Theme {
         self.get(path).and_then(ThemeFile::json)
     }
 
+    /// The trimmed source of a template's line, by Shopify's template name (`snippets/price`).
+    pub fn line(&self, template: &str, line: u32) -> Option<String> {
+        let f = self.get(&format!("{template}.liquid")).or_else(|| self.get(template))?;
+        let text = f.source.lines().nth(line.checked_sub(1)? as usize)?;
+        Some(text.trim().to_string())
+    }
+
     /// The default locale file, `locales/*.default.json`.
     pub fn default_locale(&self) -> Option<lq_json::Value> {
         self.files

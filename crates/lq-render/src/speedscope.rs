@@ -145,6 +145,36 @@ pub fn from_profile(p: &crate::Profile, model: &crate::CostModel) -> Tree {
     }
 }
 
+/// The line each node's own time belongs to. Frames with a line are their own; frames without
+/// one (filters, `Custom`, a rendered snippet's `liquid_template`) go to the nearest ancestor with
+/// a line, so a filter's time counts towards the `Variable` that called it. Wrappers with no such
+/// ancestor (`liquid_template sections/x` under `raw_section`) get their template with line 0.
+pub fn attribution(tree: &Tree) -> Vec<(String, u32)> {
+    let mut parent = vec![u32::MAX; tree.nodes.len()];
+    for (i, n) in tree.nodes.iter().enumerate() {
+        for &c in &n.children {
+            parent[c as usize] = i as u32;
+        }
+    }
+    let mut keys: Vec<(String, u32)> = Vec::with_capacity(tree.nodes.len());
+    for (i, n) in tree.nodes.iter().enumerate() {
+        let (file, line) = match_key(&tree.frames[n.frame as usize]);
+        let p = parent[i];
+        let inherited = if p == u32::MAX { None } else { Some(&keys[p as usize]) };
+        let key = if line > 0 {
+            (file, line)
+        } else {
+            match inherited {
+                Some(k) if k.1 > 0 => k.clone(),
+                Some(k) if file.is_empty() => k.clone(),
+                _ => (file, 0),
+            }
+        };
+        keys.push(key);
+    }
+    keys
+}
+
 /// The key two profiles' frames are matched on: the template without its extension, and the line.
 pub fn match_key(f: &FrameKey) -> (String, u32) {
     let file = f.file.trim_start_matches('/');

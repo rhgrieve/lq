@@ -85,14 +85,19 @@ fn json_templates_sections_and_blocks() {
     assert!(res.html.contains("Hi|5|<B>text"), "{}", res.html);
     // Frames: the section, then the outputs inside it.
     let names: Vec<&str> = res.profile.frames.iter().map(|f| f.name.as_str()).collect();
-    assert!(names.contains(&"section hero (hero)"), "{names:?}");
-    assert!(names.contains(&"section.settings.title"), "{names:?}");
+    for want in ["json_template", "raw_section", "liquid_template", "section", "Variable", "Custom", "content_for"] {
+        assert!(names.contains(&want), "{want} missing from {names:?}");
+    }
+    let files: Vec<&str> = res.profile.frames.iter().map(|f| &*f.file).collect();
+    assert!(files.contains(&"blocks/text") && files.contains(&"sections/hero"), "{files:?}");
 }
 
 #[test]
 fn missing_snippet_prints_liquid_error() {
     let res = render_with(&[("templates/index.liquid", "a\n{% render 'nope' %}")], "index");
     assert_eq!(res.html, "a\nLiquid error (templates/index line 2): Could not find asset snippets/nope.liquid");
+    let names: Vec<&str> = res.profile.frames.iter().map(|f| f.name.as_str()).collect();
+    assert!(names.contains(&"Render"), "{names:?}");
 }
 
 #[test]
@@ -128,14 +133,14 @@ fn calibration_recovers_loop_counts_and_costs() {
         *v *= if k.starts_with("filter:") { 2.0 } else { 1.5 };
     }
     let mut real_shapes = HashMap::new();
-    real_shapes.insert("templates/collection.liquid:1".to_string(), 7);
+    real_shapes.insert("templates/collection:1".to_string(), 7);
     let real = render_page(&theme, &shop, &req, &truth, Limits::default(), &real_shapes).unwrap();
     let real_tree = lq_render::speedscope::read(&real.profile.to_speedscope(&truth)).unwrap();
 
     let prior = CostModel::builtin();
     let samples = [Sample { page: req.clone(), real: real_tree, label: "collection".into() }];
     let c = calibrate(&theme, &shop, &samples, &prior, Limits::default(), HashMap::new()).unwrap();
-    assert_eq!(c.shapes.get("templates/collection.liquid:1"), Some(&7), "{:?}", c.shape_changes);
+    assert_eq!(c.shapes.get("templates/collection:1"), Some(&7), "{:?}", c.shape_changes);
     let fit = &c.pages[0];
     assert!((fit.after_ms - fit.real_ms).abs() / fit.real_ms < 0.05, "real {} after {}", fit.real_ms, fit.after_ms);
     assert!((fit.before_ms - fit.real_ms).abs() > (fit.after_ms - fit.real_ms).abs());

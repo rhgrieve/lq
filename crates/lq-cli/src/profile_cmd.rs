@@ -216,7 +216,7 @@ fn run(a: &Args) -> Result<i32, String> {
         let req = PageRequest { template: page.clone(), handle: a.handle.clone() };
         let res = lq_render::render_page(&theme, &shop, &req, &model, limits(a), &shapes)?;
         let tree = speedscope::from_profile(&res.profile, &model);
-        let summary = report::summarize(&tree);
+        let summary = report::summarize(&tree, Some(&|f: &str, l: u32| theme.line(f, l)));
         let db: Vec<(String, f64)> = res.profile.op_totals().into_iter().filter(|(k, _)| k.starts_with("db:")).collect();
         if let Some(path) = &a.speedscope {
             let path = per_page(path, page, pages.len());
@@ -345,8 +345,8 @@ fn compare(
         let req = PageRequest { template: page.clone(), handle: a.handle.clone() };
         let before = lq_render::render_page(&base, shop, &req, model, limits(a), shapes)?;
         let after = lq_render::render_page(theme, shop, &req, model, limits(a), shapes)?;
-        let sb = report::summarize(&speedscope::from_profile(&before.profile, model));
-        let sa = report::summarize(&speedscope::from_profile(&after.profile, model));
+        let sb = report::summarize(&speedscope::from_profile(&before.profile, model), Some(&|f: &str, l: u32| base.line(f, l)));
+        let sa = report::summarize(&speedscope::from_profile(&after.profile, model), Some(&|f: &str, l: u32| theme.line(f, l)));
         if a.json {
             json_pages.push(serde_json::json!({
                 "page": page, "base_ms": sb.total_us / 1000.0, "head_ms": sa.total_us / 1000.0,
@@ -422,7 +422,10 @@ fn analyze(a: &Args) -> Result<i32, String> {
     };
     let text = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
     let tree = speedscope::read(&text).map_err(|e| format!("{file}: {e}"))?;
-    let summary = report::summarize(&tree);
+    // With a theme at --path, lines show their code; frames only name the tag class.
+    let theme = Theme::load(&a.path).ok();
+    let source = |f: &str, l: u32| theme.as_ref().and_then(|t| t.line(f, l));
+    let summary = report::summarize(&tree, Some(&source));
     if a.json {
         println!("{}", serde_json::to_string_pretty(&report::json(&summary)).unwrap());
     } else {

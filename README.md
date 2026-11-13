@@ -232,8 +232,9 @@ lq profile --page index --speedscope p.json  # the profile, to open in https://w
 It renders the page against a mock shop with its own Liquid interpreter, and counts what each tag and output does:
 lookups, filters, loop iterations, snippet renders, and reads Shopify serves from its database, such as metafields,
 `collection.products`, `all_products[...]` and `product.collections`. A cost model turns the counts into time. The
-profile has the shape of `shopify theme profile`'s, since both follow the Liquid gem's profiler: one frame per rendered
-tag or output, nested under the tag that rendered it, with its template and line.
+profile has the same frames as `shopify theme profile`'s: one per rendered tag or output, named by tag class (`Assign`,
+`For`, `Render`, `Variable`) with its template and line, Shopify's own tags under a `Custom` frame, a frame per filter
+call, and `liquid_template`, `section` and `raw_section` around each template, as Shopify nests them.
 
 - **The mock shop.** `lq profile init` writes `.lq/shop.json`: 48 products with 9 variants and 4 images each,
   collections of 24, menus, a cart of 3 and so on. Resize it with `--set`, such as `--set collection_size=50`, or edit
@@ -242,9 +243,12 @@ tag or output, nested under the tag that rendered it, with its template and line
   `shopify theme profile --url /products/x --json > real/product.json`, then run
   `lq profile calibrate product=real/product.json collection=real/collection.json`. lq matches frames by template and
   line, takes each loop's real iteration count (`.lq/profile-shapes.json`), and fits the costs
-  (`.lq/profile-costs.json`). It reports how close the fit is per page. Keep real profiles out of version control if
+  (`.lq/profile-costs.json`). It reports how close the fit is per page. Calibrate against the files of the theme you
+  profiled: JSON templates edited in the theme editor usually aren't in git, so pull them first
+  (`shopify theme pull --theme <id>`), or lines won't match. Keep real profiles out of version control if
   they come from a client's store.
-- `lq profile analyze real.json` gives the same report for any Speedscope file, including the CLI's.
+- `lq profile analyze real.json --path <theme>` gives the same report for a real profile, with each line's code taken
+  from the theme, since Shopify's frames only name the tag.
 
 Rankings and before/after differences are the reliable part. Absolute times are estimates even after calibration: lq
 doesn't model Shopify's caches, database latency or app blocks, and the mock shop is only as close to the real catalogue
