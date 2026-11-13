@@ -51,6 +51,7 @@ pub fn render_page(
 
     let mut r = Renderer::new(theme, model, &format!("{} (lq estimate)", req.template), limits);
     r.loop_shapes = loop_shapes.clone();
+    r.page = req.template.clone();
     set_globals(&mut r, shop, &kind, suffix.as_deref(), req.handle.as_deref())?;
 
     // The template: a JSON template's sections, or a Liquid template.
@@ -122,7 +123,9 @@ fn set_globals(r: &mut Renderer<'_>, shop: &Shop, kind: &str, suffix: Option<&st
     r.set_global("blogs", accessor("blogs", &shop.blogs));
     r.set_global("articles", accessor("articles", &shop.articles));
     r.set_global("linklists", accessor("linklists", &shop.linklists));
-    r.set_global("metaobjects", accessor("metaobjects", &[]));
+    let mut metaobjects = Object::new("metaobjects");
+    metaobjects.set("__entries", Value::Int(shop.knobs.metaobject_entries as i64));
+    r.set_global("metaobjects", Value::object(metaobjects));
     r.set_global("images", accessor("images", &[]));
 
     let mut template = Object::new("template");

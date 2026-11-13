@@ -1,7 +1,7 @@
 {
   "calibrated": false,
   "source": "built-in estimates",
-  "provenance": "Hand estimates of Shopify's per-operation costs, then moved halfway (in log terms) towards a fit to three captures of one production store (November 2026): logic x1.57, filters x2.28, database x2.22, templates x0.80. template_load, global:content_for_header, load:product and preload:product were first set from the same captures. One store is little evidence; run lq profile calibrate for yours.",
+  "provenance": "Hand estimates of Shopify's per-operation costs, then moved halfway (in log terms) towards a fit to three captures of one production store (November 2026): logic x1.57, filters x2.28, database x2.22, templates x0.80. template_load, global:content_for_header, load:product and preload:product were first set from the same captures. One store is little evidence; run lq profile calibrate for yours. preload_page (a paginated page's items), preload (other database lists) and db:metaobject.* (a metaobject's fields, such as file lists) were set from the same captures: about 11 ms, 2 ms and 1 ms. db:product.selected_or_first_available_variant (about 1.2 ms) likewise.",
   "unit": "microseconds",
   "coefficients": {
     "node": 3.1496,
@@ -65,7 +65,7 @@
     "filter:line_items_for": 45.5631,
     "load:product": 3330.5405,
     "load:variant": 222.036,
-    "preload:product": 6661.081,
+    "preload:product": 1500.0,
     "preload:collection": 1332.2162,
     "preload:article": 666.1081,
     "load:collection": 1332.2162,
@@ -103,7 +103,12 @@
     "db:blog.articles": 444.0721,
     "db:cart.items": 88.8144,
     "db:customer.orders": 333.054,
-    "db:localization.available_countries": 88.8144
+    "db:localization.available_countries": 88.8144,
+    "preload_page:product": 6661.081,
+    "preload_page:collection": 1332.2162,
+    "preload_page:article": 666.1081,
+    "db:metaobject.*": 600.0,
+    "db:product.selected_or_first_available_variant": 1000.0
   },
   "db_fields": [
     "product.metafields",
@@ -142,6 +147,8 @@
     "cart.items",
     "customer.orders",
     "localization.available_countries",
-    "localization.available_languages"
+    "localization.available_languages",
+    "metaobject.*",
+    "product.selected_or_first_available_variant"
   ]
 }

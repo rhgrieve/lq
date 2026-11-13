@@ -208,7 +208,7 @@ pub fn json(s: &Summary) -> serde_json::Value {
         "blocks": rows(&s.blocks, usize::MAX),
         "snippets": rows(&s.snippets, usize::MAX),
         "apps": rows(&s.apps, usize::MAX),
-        "lines": rows(&s.lines, 200),
+        "lines": rows(&s.lines, 1000),
     })
 }
 

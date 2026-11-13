@@ -71,6 +71,7 @@ fn knob_for(expr: &str) -> Option<&'static str> {
         "products" if parent.contains("collection") => "collection_size",
         "options_with_values" if product_like => "options",
         "values" if parent.contains("option") => "values_per_option",
+        "values" if segs.first() == Some(&"metaobjects") || segs.contains(&"metaobjects") => "metaobject_entries",
         "filters" => "filters",
         // `link.links` is a submenu; `menu.links` or `linklists.main-menu.links` a top-level menu.
         "links" if parent.ends_with("link") && !parent.ends_with("linklist") => "menu_children",
@@ -104,7 +105,9 @@ fn fit_knobs(
         for s in samples {
             let res = render_page(theme, current.as_ref().unwrap_or(shop), &s.page, prior, limits, &HashMap::new())?;
             let sim = crate::speedscope::from_profile(&res.profile, prior);
-            let real_iters = loop_iterations(&s.real, is_loop);
+            let (_, marker) = sim_loops(&res.profile, &sim);
+            let real_iters: HashMap<Key, f64> =
+                real_loops(&s.real, &marker).into_iter().map(|(k, (i, c))| (k, if c > 0.0 { i / c } else { 0.0 })).collect();
             let mut sim_keys: HashMap<Key, String> = HashMap::new();
             for f in &sim.frames {
                 if is_loop(&f.name) {
@@ -146,6 +149,7 @@ fn fit_knobs(
             ("cart_items", &mut next.cart_items, 100),
             ("tags_per_product", &mut next.tags_per_product, 100),
             ("articles", &mut next.articles, 250),
+            ("metaobject_entries", &mut next.metaobject_entries, 250),
         ] {
             if let Some(&v) = seen.get(knob) {
                 *field = set(v, max);
@@ -179,24 +183,63 @@ type Key = (String, u32);
 /// Lines an op must appear on before its cost is fitted freely.
 const MIN_SUPPORT: usize = 8;
 
-/// Average iterations per call of each loop, from a tree: the most frequent direct child line.
-fn loop_iterations(tree: &Tree, is_loop: impl Fn(&str) -> bool) -> HashMap<Key, f64> {
+/// lq's loops: exact iterations and calls per loop line, and for each loop a child line that runs
+/// exactly once per iteration, to count the real loop's iterations by. (Shopify's frames have no
+/// column, so two tags on one line look like one line run twice; counting a line known to run once
+/// per iteration avoids that.)
+fn sim_loops(p: &crate::Profile, tree: &Tree) -> (HashMap<Key, (f64, f64)>, HashMap<Key, Key>) {
+    let iter_op = p.ops.names.iter().position(|n| n == "iter").map(|i| i as u32);
+    let mut acc: HashMap<Key, (f64, f64)> = HashMap::new();
+    let mut child_counts: HashMap<Key, HashMap<Key, f64>> = HashMap::new();
+    for (i, node) in p.nodes.iter().enumerate() {
+        let f = &p.frames[node.frame as usize];
+        if !is_loop(&f.name) {
+            continue;
+        }
+        let iters: f64 = node.counts.iter().filter(|(op, _)| Some(*op) == iter_op).map(|(_, c)| c).sum();
+        let key = match_key(f);
+        let e = acc.entry(key.clone()).or_default();
+        e.0 += iters;
+        e.1 += 1.0;
+        let cc = child_counts.entry(key).or_default();
+        for &c in &tree.nodes[i].children {
+            *cc.entry(match_key(&tree.frames[tree.nodes[c as usize].frame as usize])).or_default() += 1.0;
+        }
+    }
+    let mut marker = HashMap::new();
+    for (key, cc) in child_counts {
+        let iters = acc[&key].0;
+        // The earliest child line that ran exactly once per iteration.
+        if let Some((k, _)) = cc.iter().filter(|(k, n)| k.1 > 0 && **n == iters && iters > 0.0).min_by_key(|(k, _)| k.1) {
+            marker.insert(key, k.clone());
+        }
+    }
+    (acc, marker)
+}
+
+/// The real store's loops: iterations (counted by each loop's marker line, else by its most
+/// frequent child line) and calls.
+fn real_loops(tree: &Tree, marker: &HashMap<Key, Key>) -> HashMap<Key, (f64, f64)> {
     let mut acc: HashMap<Key, (f64, f64)> = HashMap::new();
     for node in &tree.nodes {
         let f = &tree.frames[node.frame as usize];
         if !is_loop(&f.name) {
             continue;
         }
+        let key = match_key(f);
         let mut counts: HashMap<Key, usize> = HashMap::new();
         for &c in &node.children {
             *counts.entry(match_key(&tree.frames[tree.nodes[c as usize].frame as usize])).or_default() += 1;
         }
-        let iters = counts.values().copied().max().unwrap_or(0) as f64;
-        let e = acc.entry(match_key(f)).or_default();
-        e.0 += iters;
+        let iters = match marker.get(&key) {
+            Some(m) => counts.get(m).copied().unwrap_or(0),
+            None => counts.values().copied().max().unwrap_or(0),
+        };
+        let e = acc.entry(key).or_default();
+        e.0 += iters as f64;
         e.1 += 1.0;
     }
-    acc.into_iter().map(|(k, (sum, n))| (k, sum / n)).collect()
+    acc
 }
 
 fn is_loop(name: &str) -> bool {
@@ -299,14 +342,16 @@ pub fn calibrate(
     let (fitted, knob_changes) = fit_knobs(theme, shop, samples, prior, limits)?;
     let shop = fitted.as_ref().map_or(shop, |(s, _)| s);
 
-    // 1. Shapes.
+    // 1. Shapes. A loop's count is averaged over every capture that ran it, weighted by its calls:
+    // a snippet rendered on several pages (a product card) sees different data on each.
     for _round in 0..4 {
-        let mut changed = false;
+        let mut real_acc: HashMap<String, (f64, f64)> = HashMap::new();
+        let mut sim_acc: HashMap<String, (f64, f64)> = HashMap::new();
         for s in samples {
             let res = render_page(theme, shop, &s.page, prior, limits, &shapes)?;
             let sim = crate::speedscope::from_profile(&res.profile, prior);
-            let real_iters = loop_iterations(&s.real, is_loop);
-            let sim_iters = loop_iterations(&sim, is_loop);
+            let (sim_iters, marker) = sim_loops(&res.profile, &sim);
+            let real_iters = real_loops(&s.real, &marker);
             // Loop frames in lq's tree, keyed back to their full file path for `loop_shapes`.
             let mut sim_files: HashMap<Key, String> = HashMap::new();
             for f in &sim.frames {
@@ -314,15 +359,36 @@ pub fn calibrate(
                     sim_files.insert(match_key(f), format!("{}:{}", f.file, f.line));
                 }
             }
-            for (key, sim_n) in &sim_iters {
-                let Some(&real_n) = real_iters.get(key) else { continue };
+            for (key, &(iters, calls)) in &sim_iters {
                 let Some(loc) = sim_files.get(key) else { continue };
-                let want = real_n.round() as usize;
-                if want != sim_n.round() as usize && shapes.get(loc) != Some(&want) {
-                    shape_changes.push(format!("{loc}: {sim_n:.1} → {want} iterations ({})", s.label));
-                    shapes.insert(loc.clone(), want);
-                    changed = true;
+                let Some(&(ri, rc)) = real_iters.get(key) else { continue };
+                // Once for every page (the fallback), and once for this page.
+                for k in [loc.clone(), format!("{}|{loc}", s.page.template)] {
+                    let e = real_acc.entry(k.clone()).or_default();
+                    e.0 += ri;
+                    e.1 += rc;
+                    let e = sim_acc.entry(k).or_default();
+                    e.0 += iters;
+                    e.1 += calls;
                 }
+            }
+        }
+        let mut changed = false;
+        let mut locs: Vec<_> = real_acc.keys().cloned().collect();
+        locs.sort();
+        for loc in locs {
+            let (ri, rc) = real_acc[&loc];
+            let (si, sc) = sim_acc[&loc];
+            if rc == 0.0 || sc == 0.0 {
+                continue;
+            }
+            let (real_n, sim_n) = (ri / rc, si / sc);
+            let want = real_n.round() as usize;
+            if want != sim_n.round() as usize && shapes.get(&loc) != Some(&want) {
+                shape_changes.retain(|c: &String| !c.starts_with(&format!("{loc}: ")));
+                shape_changes.push(format!("{loc}: {sim_n:.1} → {want} iterations"));
+                shapes.insert(loc, want);
+                changed = true;
             }
         }
         if !changed {
@@ -511,13 +577,19 @@ fn sample_data(
     }
     let real = self_by_key(&s.real);
     let real_total: f64 = real.values().sum();
+    let (real_calls, sim_calls) = (calls_by_key(&s.real), calls_by_key(&crate::speedscope::from_profile(p, prior)));
     let mut rows = Vec::new();
     let mut matched = 0.0;
     for (key, y) in &real {
         match counts.get(key) {
             Some(x) => {
-                rows.push((x.clone(), *y / speed));
                 matched += y;
+                // Only lines where lq did the same work teach the costs: where a loop or branch ran
+                // a different number of times, the gap is data, not price.
+                let (rc, sc) = (real_calls.get(key).copied().unwrap_or(0) as f64, sim_calls.get(key).copied().unwrap_or(0) as f64);
+                if key.1 == 0 || (rc > 0.0 && sc > 0.0 && (0.8..=1.25).contains(&(sc / rc))) {
+                    rows.push((x.clone(), *y / speed));
+                }
             }
             None => {
                 // Frames lq never rendered: app blocks, Shopify's own wrappers, untouched branches.

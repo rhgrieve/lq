@@ -21,6 +21,8 @@ pub struct Knobs {
     pub collections: usize,
     pub collection_size: usize,
     pub metafields_per_product: usize,
+    /// Entries per metaobject type.
+    pub metaobject_entries: usize,
     pub tags_per_product: usize,
     pub cart_items: usize,
     pub articles: usize,
@@ -43,6 +45,7 @@ impl Default for Knobs {
             collections: 6,
             collection_size: 24,
             metafields_per_product: 4,
+            metaobject_entries: 10,
             tags_per_product: 5,
             cart_items: 3,
             articles: 6,
@@ -69,7 +72,7 @@ impl Knobs {
             "values_per_option": self.values_per_option, "variants_per_product": self.variants_per_product,
             "images_per_product": self.images_per_product,
             "collections": self.collections, "collection_size": self.collection_size,
-            "metafields_per_product": self.metafields_per_product, "tags_per_product": self.tags_per_product,
+            "metafields_per_product": self.metafields_per_product, "metaobject_entries": self.metaobject_entries, "tags_per_product": self.tags_per_product,
             "cart_items": self.cart_items, "articles": self.articles, "countries": self.countries,
             "languages": self.languages, "menu_links": self.menu_links, "menu_children": self.menu_children,
             "filters": self.filters, "logged_in": self.logged_in,
@@ -80,15 +83,15 @@ impl Knobs {
         let d = Knobs::default();
         let Knobs {
             mut products, mut options, mut values_per_option, mut variants_per_product, mut images_per_product, mut collections,
-            mut collection_size, mut metafields_per_product, mut tags_per_product, mut cart_items,
+            mut collection_size, mut metafields_per_product, mut metaobject_entries, mut tags_per_product, mut cart_items,
             mut articles, mut countries, mut languages, mut menu_links, mut menu_children, mut filters, ..
         } = d;
         knob_fields!(m, products, options, values_per_option, variants_per_product, images_per_product, collections,
-            collection_size, metafields_per_product, tags_per_product, cart_items, articles, countries,
+            collection_size, metafields_per_product, metaobject_entries, tags_per_product, cart_items, articles, countries,
             languages, menu_links, menu_children, filters);
         Knobs {
             products, options, values_per_option, variants_per_product, images_per_product, collections, collection_size,
-            metafields_per_product, tags_per_product, cart_items, articles, countries, languages,
+            metafields_per_product, metaobject_entries, tags_per_product, cart_items, articles, countries, languages,
             menu_links, menu_children, filters,
             logged_in: m.get("logged_in").and_then(J::as_bool).unwrap_or(false),
         }

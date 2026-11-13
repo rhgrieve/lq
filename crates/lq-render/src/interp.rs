@@ -53,12 +53,19 @@ pub struct Renderer<'t> {
     pub(crate) translations: Value,
     /// `file:line` of a `for` tag → iterations, from calibration.
     pub loop_shapes: HashMap<String, usize>,
+    /// The page's template, such as `product`, for page-specific loop counts.
+    pub page: String,
     /// `file:line` of each loop rendered → the expression it iterates, for fitting the mock shop.
     pub loop_sources: HashMap<String, String>,
     pub errors: Vec<String>,
     loaded: HashSet<Rc<str>>,
     /// Lists read from database-backed fields, kept alive so their addresses stay unique.
     bulk: HashMap<usize, Rc<Vec<Value>>>,
+    stand_ins: HashMap<String, Value>,
+    /// (list, item, position) already fetched by a loop over a database-backed list.
+    fetched: HashSet<(usize, u32, usize)>,
+    /// Lists that are a paginated page.
+    paged: HashSet<usize>,
     /// Filters and tags lq passed through without modelling them.
     pub unsupported: std::collections::BTreeSet<String>,
     pub layout: Option<String>,
@@ -88,10 +95,14 @@ impl<'t> Renderer<'t> {
             containers: Vec::new(),
             translations,
             loop_shapes: HashMap::new(),
+            page: String::new(),
             loop_sources: HashMap::new(),
             errors: Vec::new(),
             loaded: HashSet::new(),
             bulk: HashMap::new(),
+            stand_ins: HashMap::new(),
+            fetched: HashSet::new(),
+            paged: HashSet::new(),
             unsupported: Default::default(),
             layout: None,
             nodes: 0,
@@ -641,6 +652,57 @@ impl<'t> Renderer<'t> {
         Flow::Normal
     }
 
+    /// Metaobjects: the mock shop can't know a store's metaobject types or fields, so any type
+    /// has entries, and any field of an entry is a stand-in that prints as text and iterates as a
+    /// few images. Calibration sizes the entries; loop counts per line come from the real store.
+    fn stand_in(&mut self, o: &Rc<Object>, key: &str) -> Option<Value> {
+        let cache_key = format!("{}\0{}\0{key}", o.id, o.ty);
+        if let Some(v) = self.stand_ins.get(&cache_key) {
+            return Some(v.clone());
+        }
+        let v = match &*o.ty {
+            "metaobjects" => {
+                let n = o.get("__entries").and_then(Value::as_int).unwrap_or(10).max(0) as usize;
+                let entries: Vec<Value> = (0..n).map(|i| stand_in_entry(key, &format!("{key}-{}", i + 1))).collect();
+                let mut def = Object::new("metaobject_definition");
+                def.set("values", Value::array(entries.clone()));
+                def.set("values_count", Value::Int(n as i64));
+                def.set("__items", Value::array(entries.clone()));
+                let def = Value::object(def);
+                if let Value::Object(d) = &def {
+                    if let Some(Value::Array(a)) = d.get("values") {
+                        self.bulk.insert(Rc::as_ptr(a) as usize, a.clone());
+                    }
+                }
+                def
+            }
+            "metaobject_definition" => stand_in_entry(key, key),
+            "metaobject" if o.get("__stand_in").is_some() => {
+                let images: Vec<Value> = (1..=3)
+                    .map(|i| {
+                        let src = format!("//cdn.shopify.com/s/files/1/0000/0001/files/{key}-{i}.jpg");
+                        let mut img = Object::new("image");
+                        img.set("src", Value::str(&src));
+                        img.set("width", Value::Int(1200));
+                        img.set("height", Value::Int(800));
+                        img.set("alt", Value::str(key));
+                        img.set("__to_s", Value::str(&src));
+                        Value::object(img)
+                    })
+                    .collect();
+                let mut field = Object::new("metafield");
+                field.set("value", Value::array(images.clone()));
+                field.set("type", Value::str("stand_in"));
+                field.set("__items", Value::array(images));
+                field.set("__to_s", Value::str(format!("Sample {key}")));
+                Value::object(field)
+            }
+            _ => return None,
+        };
+        self.stand_ins.insert(cache_key, v.clone());
+        Some(v)
+    }
+
     fn is_bulk(&self, v: &Value) -> bool {
         matches!(v, Value::Array(a) if self.bulk.contains_key(&(Rc::as_ptr(a) as usize)))
     }
@@ -648,17 +710,7 @@ impl<'t> Renderer<'t> {
     fn loop_items(&mut self, tag: &'t LiquidTag<'t>, collection: &'t Node<'t>, args: &'t [Node<'t>], reversed: bool) -> Vec<Value> {
         let coll = self.eval(collection);
         let mut items = coll.to_items();
-        // Iterating a list from the database (a collection's products, search results) loads its
-        // items in one batch, at the loop, rather than one at a time on first read.
-        if self.is_bulk(&coll) {
-            for item in &items {
-                if let Value::Object(o) = item {
-                    if self.model.loads(&o.ty) && self.db_seen.insert((o.id, Rc::from("\0load"))) {
-                        self.count(&format!("preload:{}", o.ty), 1.0);
-                    }
-                }
-            }
-        }
+        let bulk = self.is_bulk(&coll);
         let mut offset = 0usize;
         let mut limit = None;
         for a in args {
@@ -684,18 +736,44 @@ impl<'t> Renderer<'t> {
         if reversed {
             items.reverse();
         }
+        let own_len = items.len();
         // Calibrated shapes: make this loop run as often as it did on the real store.
         let key = format!("{}:{}", self.file_path(), self.line_of(tag.position.start));
         if !self.loop_sources.contains_key(&key) {
             let text = self.src(collection.position()).to_string();
             self.loop_sources.insert(key.clone(), text);
         }
-        if let Some(&n) = self.loop_shapes.get(&key) {
+        // A count for this page first (`product|snippets/card:12`), then for every page.
+        let page_key = format!("{}|{key}", self.page);
+        if let Some(&n) = self.loop_shapes.get(&page_key).or_else(|| self.loop_shapes.get(&key)) {
             if items.is_empty() {
                 items = vec![Value::Nil; n];
             } else {
                 let base = items.clone();
                 items = (0..n).map(|i| base[i % base.len()].clone()).collect();
+            }
+        }
+        // The first loop over a list from the database (a collection's products, search results)
+        // fetches its items, per item; later loops over the same list don't. Reading an item's
+        // fields still loads it. Counted on the items the loop actually runs, after `limit:` and
+        // calibrated counts.
+        if bulk {
+            let list = match &coll {
+                Value::Array(a) => Rc::as_ptr(a) as usize,
+                _ => 0,
+            };
+            for (i, item) in items.iter().enumerate() {
+                if let Value::Object(o) = item {
+                    if self.model.loads(&o.ty) && self.fetched.insert((list, o.id, i)) {
+                        // A paginated page is fetched with its sort and filters applied, which
+                        // costs more per item than other lists.
+                        // Items a calibrated count added beyond lq's own list aren't from the page.
+                        let op = if self.paged.contains(&list) && i < own_len { "preload_page" } else { "preload" };
+                        self.count(&format!("{op}:{}", o.ty), 1.0);
+                        // A fetched item is loaded: reading its fields doesn't load it again.
+                        self.db_seen.insert((o.id, Rc::from("\0load")));
+                    }
+                }
             }
         }
         items
@@ -952,6 +1030,7 @@ impl<'t> Renderer<'t> {
         let page = Rc::new(page);
         if bulk {
             self.bulk.insert(Rc::as_ptr(&page) as usize, page.clone());
+            self.paged.insert(Rc::as_ptr(&page) as usize);
         }
         self.paginate.push((key, Value::Array(page)));
         let mut scope = Scope::new();
@@ -1006,6 +1085,9 @@ impl<'t> Renderer<'t> {
                         self.bulk.insert(Rc::as_ptr(a) as usize, a.clone());
                     }
                     return x.clone();
+                }
+                if let Some(v) = self.stand_in(o, &k) {
+                    return v;
                 }
                 match k.as_str() {
                     "size" => Value::Int(match o.get("__items") {
@@ -1156,6 +1238,15 @@ impl<'t> Renderer<'t> {
             _ => Value::Nil,
         }
     }
+}
+
+fn stand_in_entry(ty: &str, handle: &str) -> Value {
+    let mut e = Object::new("metaobject");
+    e.set("handle", Value::str(handle));
+    e.set("type", Value::str(ty));
+    e.set("__stand_in", Value::Bool(true));
+    e.set("__to_s", Value::str(handle));
+    Value::object(e)
 }
 
 fn index(a: &[Value], i: i64) -> Value {

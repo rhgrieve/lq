@@ -243,8 +243,10 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
   `shopify theme profile --url /products/x --json > real/product.json`, then run
   `lq profile calibrate product=real/product.json collection=real/collection.json`. lq matches frames by template and
   line, resizes the mock shop to the real catalogue from how often loops ran (variants, images, countries,
-  menus, ...: `.lq/shop.json`), takes the remaining loops' real iteration counts (`.lq/profile-shapes.json`), and
-  fits the costs (`.lq/profile-costs.json`). Calibrate fits two models, one multiplier per kind of cost (6 numbers) and a cost per
+  menus, metaobject entries, ...: `.lq/shop.json`), takes the remaining loops' real iteration counts per page
+  (`.lq/profile-shapes.json`), and fits the costs (`.lq/profile-costs.json`) on the lines where lq did the same work as
+  Shopify. Metaobjects have stand-in entries, since lq can't know a store's metaobject types: their fields print as
+  text and iterate as a few images. Calibrate fits two models, one multiplier per kind of cost (6 numbers) and a cost per
   operation, at several strengths of pull towards the defaults. With two or more pages it estimates each page with costs
   fitted on the others only, and keeps whichever model and strength predict those held-out pages best. The report shows
   that held-out estimate per page, which is how the costs will do on pages you haven't captured. Calibrate against the
@@ -258,8 +260,8 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
 - `lq profile analyze real.json --path <theme>` gives the same report for a real profile, with each line's code taken
   from the theme, since Shopify's frames only name the tag.
 
-On a real store with three captured pages, the held-out estimates of page totals were off by 14% on average, after
-scaling out how fast each capture ran, and ranked sections and snippets at ρ 0.71–0.79. The built-in costs are hand
+On a real store with three captured pages, the held-out estimates of page totals were off by 11% on average, after
+scaling out how fast each capture ran, and ranked sections and snippets at ρ 0.70–0.79. The built-in costs are hand
 estimates moved halfway towards that one store's fit (`data/profile-costs.json` says how), so uncalibrated times are
 rough: 14–44% low on that store. Time per section and per snippet follows the real profile; time per individual line doesn't,
 since real line costs depend on data lq only approximates. So read the sections and snippets tables, and use
