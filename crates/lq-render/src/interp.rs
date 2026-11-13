@@ -952,6 +952,10 @@ impl<'t> Renderer<'t> {
         match v {
             Value::Object(o) => {
                 let k = key.render();
+                // Shopify loads a resource lazily: the first read of any field pays for it.
+                if self.model.loads(&o.ty) && self.db_seen.insert((o.id, Rc::from("\0load"))) {
+                    self.count(&format!("load:{}", o.ty), 1.0);
+                }
                 if let Some(op) = self.model.db_op(&o.ty, &k) {
                     let seen_key = (o.id, Rc::from(k.as_str()));
                     if self.db_seen.insert(seen_key) {

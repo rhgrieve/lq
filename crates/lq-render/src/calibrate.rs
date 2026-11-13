@@ -160,6 +160,7 @@ pub fn calibrate(
     let mut before = Vec::new();
     let mut unmatched_acc: HashMap<String, f64> = HashMap::new();
     let mut sims = Vec::new();
+    let mut totals: Vec<(HashMap<String, f64>, f64)> = Vec::new();
     for s in samples {
         let res = render_page(theme, shop, &s.page, prior, limits, &shapes)?;
         let p = &res.profile;
@@ -188,9 +189,22 @@ pub fn calibrate(
             }
         }
         before.push(p.total(prior));
+        let mut all: HashMap<String, f64> = HashMap::new();
+        for x in counts.values() {
+            for (op, c) in x {
+                *all.entry(op.clone()).or_default() += c;
+            }
+        }
+        totals.push((all, s.real.total_us()));
         sims.push((res.profile, counts));
     }
 
+    // Each page's total is one more equation, weighted so the fit can't trade the page total away
+    // for a closer fit on individual lines.
+    let weight = (rows.len() as f64).sqrt().max(1.0);
+    for (x, y) in totals {
+        rows.push((x.into_iter().map(|(k, v)| (k, v * weight)).collect(), y * weight));
+    }
     // Columns: every op seen. Coordinate descent on the ridge-to-prior NNLS objective.
     let ops: Vec<String> = rows.iter().flat_map(|(x, _)| x.keys().cloned()).collect::<BTreeSet<_>>().into_iter().collect();
     let col = |r: &HashMap<String, f64>, j: usize| r.get(&ops[j]).copied().unwrap_or(0.0);
@@ -252,10 +266,11 @@ pub fn calibrate(
         let matched: f64 = real.iter().filter(|(k, _)| counts.contains_key(*k)).map(|(_, v)| v).sum();
         let sim_tree = crate::speedscope::from_profile(profile, &model);
         let sim_self = self_by_key(&sim_tree);
+        // Every line with at least 0.1% of the real time; one lq didn't render counts as zero.
         let pairs: Vec<(f64, f64)> = real
             .iter()
-            .filter(|(_, v)| **v >= 0.01 * real_total)
-            .filter_map(|(k, v)| sim_self.get(k).map(|s| (*v, *s)))
+            .filter(|(k, v)| **v >= 0.001 * real_total && k.1 > 0)
+            .map(|(k, v)| (*v, sim_self.get(k).copied().unwrap_or(0.0)))
             .collect();
         pages.push(PageFit {
             label: s.label.clone(),

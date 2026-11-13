@@ -66,6 +66,11 @@ impl CostModel {
         0.0
     }
 
+    /// Whether objects of type `ty` are loaded lazily, costing `load:<ty>` on their first read.
+    pub fn loads(&self, ty: &str) -> bool {
+        !ty.is_empty() && self.coefficients.contains_key(&format!("load:{ty}"))
+    }
+
     /// The `db:` op for reading `field` on an object of type `ty`, if it's database-backed.
     pub fn db_op(&self, ty: &str, field: &str) -> Option<String> {
         if ty.is_empty() {
