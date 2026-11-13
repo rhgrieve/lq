@@ -52,6 +52,7 @@ pub fn render_page(
     let mut r = Renderer::new(theme, model, &format!("{} (lq estimate)", req.template), limits);
     r.loop_shapes = loop_shapes.clone();
     r.page = req.template.clone();
+    r.page_handle = req.handle.clone();
     set_globals(&mut r, shop, &kind, suffix.as_deref(), req.handle.as_deref())?;
 
     // The template: a JSON template's sections, or a Liquid template.
@@ -96,7 +97,8 @@ fn handle_of(v: &Value) -> String {
 
 fn pick(list: &[Value], handle: Option<&str>) -> Value {
     match handle {
-        Some(h) => list.iter().find(|v| handle_of(v) == h).cloned().unwrap_or_default(),
+        // A real handle the mock shop doesn't have renders its first item as a stand-in.
+        Some(h) => list.iter().find(|v| handle_of(v) == h).or(list.first()).cloned().unwrap_or_default(),
         None => list.first().cloned().unwrap_or_default(),
     }
 }

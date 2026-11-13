@@ -241,7 +241,10 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
   the file. Settings that name a product or collection resolve to a mock one, so a theme's real settings still render.
 - **Calibration.** The built-in costs are estimates. Capture a few real profiles once, with
   `shopify theme profile --url /products/x --json > real/product.json`, then run
-  `lq profile calibrate product=real/product.json collection=real/collection.json`. lq matches frames by template and
+  `lq profile calibrate product@some-handle=real/product.json collection@all=real/collection.json`. The `@handle`
+  keeps that page's loop counts separate, and `lq profile --page product --handle some-handle` uses them.
+  Capture each page two or three times after a warm-up request: the same page can take twice as long from one
+  request to the next. lq matches frames by template and
   line, resizes the mock shop to the real catalogue from how often loops ran (variants, images, countries,
   menus, metaobject entries, ...: `.lq/shop.json`), takes the remaining loops' real iteration counts per page
   (`.lq/profile-shapes.json`), and fits the costs (`.lq/profile-costs.json`) on the lines where lq did the same work as
@@ -260,10 +263,12 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
 - `lq profile analyze real.json --path <theme>` gives the same report for a real profile, with each line's code taken
   from the theme, since Shopify's frames only name the tag.
 
-On a real store with three captured pages, the held-out estimates of page totals were off by 11% on average, after
-scaling out how fast each capture ran, and ranked sections and snippets at ρ 0.70–0.79. The built-in costs are hand
+On a real store's staging copy, with 31 warm captures of 7 page types and each page type held out in turn, the
+estimates of page totals were off by 18% on average after scaling out how fast each capture ran, and ranked
+sections and snippets at ρ 0.6–0.85. Collection pages vary most: fetching a collection's products takes 0.1 ms or
+5 ms per product depending on Shopify's caches, which lq can't see. The built-in costs are hand
 estimates moved halfway towards that one store's fit (`data/profile-costs.json` says how), so uncalibrated times are
-rough: 14–44% low on that store. Time per section and per snippet follows the real profile; time per individual line doesn't,
+rough: 17% off on average across those captures. Time per section and per snippet follows the real profile; time per individual line doesn't,
 since real line costs depend on data lq only approximates. So read the sections and snippets tables, and use
 `--compare` for regressions, where both sides share the same mock shop. Absolute times are estimates: lq doesn't model
 Shopify's caches, database latency or app blocks, and the mock shop is only as close to the real catalogue as its sizes.

@@ -363,7 +363,11 @@ pub fn calibrate(
                 let Some(loc) = sim_files.get(key) else { continue };
                 let Some(&(ri, rc)) = real_iters.get(key) else { continue };
                 // Once for every page (the fallback), and once for this page.
-                for k in [loc.clone(), format!("{}|{loc}", s.page.template)] {
+                let mut keys = vec![loc.clone(), format!("{}|{loc}", s.page.template)];
+                if let Some(h) = &s.page.handle {
+                    keys.push(format!("{}@{h}|{loc}", s.page.template));
+                }
+                for k in keys {
                     let e = real_acc.entry(k.clone()).or_default();
                     e.0 += ri;
                     e.1 += rc;
@@ -410,14 +414,19 @@ pub fn calibrate(
         Some(m) => vec![m],
         None => vec![Mode::Grouped, Mode::PerOp],
     };
+    // Captures of the same page are held out together: repeats of a page would otherwise leak its
+    // answer into the fit, and the point is how the costs do on a page not captured at all.
+    let groups: Vec<&str> = samples.iter().map(|s| s.page.template.as_str()).collect();
+    let distinct = groups.iter().collect::<std::collections::HashSet<_>>().len();
     let mut held_out: Vec<(Choice, Vec<Eval>)> = Vec::new();
-    if samples.len() >= 2 {
+    if distinct >= 2 {
         for &mode in &modes {
             for pull in PULLS {
                 let choice = Choice { mode, pull };
                 let evals = (0..samples.len())
                     .map(|i| {
-                        let train: Vec<&SampleData> = data.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, d)| d).collect();
+                        let train: Vec<&SampleData> =
+                            data.iter().enumerate().filter(|(j, _)| groups[*j] != groups[i]).map(|(_, d)| d).collect();
                         let m = fit(prior, &train, choice);
                         evaluate(&samples[i], &data[i], &m)
                     })
@@ -547,6 +556,9 @@ type Row = (HashMap<String, f64>, f64);
 /// One page's equations: a row per matched line (lq's op counts against the real own time) and a
 /// row for the page total, with times divided by the capture's speed.
 struct SampleData {
+    /// The real profile's own time per line, and its section, block and snippet totals.
+    real_self: HashMap<Key, f64>,
+    real_named: HashMap<String, f64>,
     rows: Vec<Row>,
     total: Row,
     profile: crate::Profile,
@@ -588,7 +600,7 @@ fn sample_data(
                 // a different number of times, the gap is data, not price.
                 let (rc, sc) = (real_calls.get(key).copied().unwrap_or(0) as f64, sim_calls.get(key).copied().unwrap_or(0) as f64);
                 if key.1 == 0 || (rc > 0.0 && sc > 0.0 && (0.8..=1.25).contains(&(sc / rc))) {
-                    rows.push((x.clone(), *y / speed));
+                    rows.push((speed_scaled(x, speed), *y));
                 }
             }
             None => {
@@ -610,8 +622,10 @@ fn sample_data(
         }
     }
     Ok(SampleData {
+        real_self: real.clone(),
+        real_named: named_totals(&crate::report::summarize(&s.real, None)),
         rows,
-        total: (all, s.real.total_us() / speed),
+        total: (speed_scaled(&all, speed), s.real.total_us()),
         profile: res.profile,
         matched_share: if real_total > 0.0 { matched / real_total } else { 0.0 },
         speed,
@@ -623,8 +637,22 @@ fn sample_data(
 fn solve(rows: &[(Vec<f64>, f64)], prior: &[f64], lambda: &[f64], lo: &[f64], hi: &[f64]) -> Vec<f64> {
     let n = prior.len();
     let mut c = prior.to_vec();
-    let diag: Vec<f64> = (0..n).map(|j| rows.iter().map(|(x, _)| x[j] * x[j]).sum()).collect();
-    let mut resid: Vec<f64> = rows.iter().map(|(x, y)| x.iter().zip(&c).map(|(a, b)| a * b).sum::<f64>() - y).collect();
+    // Columns as (row, value) lists: most rows use a few ops, so each update touches only those.
+    let mut cols: Vec<Vec<(u32, f64)>> = vec![Vec::new(); n];
+    for (i, (x, _)) in rows.iter().enumerate() {
+        for (j, &v) in x.iter().enumerate() {
+            if v != 0.0 {
+                cols[j].push((i as u32, v));
+            }
+        }
+    }
+    let diag: Vec<f64> = cols.iter().map(|col| col.iter().map(|(_, v)| v * v).sum()).collect();
+    let mut resid: Vec<f64> = rows.iter().map(|(_, y)| -y).collect();
+    for (j, col) in cols.iter().enumerate() {
+        for &(i, v) in col {
+            resid[i as usize] += v * c[j];
+        }
+    }
     for _sweep in 0..500 {
         let mut moved = 0.0f64;
         for j in 0..n {
@@ -632,16 +660,14 @@ fn solve(rows: &[(Vec<f64>, f64)], prior: &[f64], lambda: &[f64], lo: &[f64], hi
                 continue;
             }
             let mut num = lambda[j] * prior[j];
-            for (i, (x, _)) in rows.iter().enumerate() {
-                if x[j] != 0.0 {
-                    num -= x[j] * (resid[i] - x[j] * c[j]);
-                }
+            for &(i, v) in &cols[j] {
+                num -= v * (resid[i as usize] - v * c[j]);
             }
             let new = (num / (diag[j] + lambda[j])).clamp(lo[j], hi[j]);
             let delta = new - c[j];
             if delta != 0.0 {
-                for (i, (x, _)) in rows.iter().enumerate() {
-                    resid[i] += x[j] * delta;
+                for &(i, v) in &cols[j] {
+                    resid[i as usize] += v * delta;
                 }
                 moved = moved.max(delta.abs() / (c[j].abs() + 1e-9));
                 c[j] = new;
@@ -652,6 +678,20 @@ fn solve(rows: &[(Vec<f64>, f64)], prior: &[f64], lambda: &[f64], lo: &[f64], hi
         }
     }
     c
+}
+
+/// A capture's speed scales computation, not database work: a busy renderer runs Liquid slower,
+/// but a fetch takes as long as the database takes. So op counts other than database ones are
+/// multiplied by the speed, and the real times are used as they are.
+fn speed_scaled(x: &HashMap<String, f64>, speed: f64) -> HashMap<String, f64> {
+    x.iter().map(|(op, c)| (op.clone(), if op_group(op) == "database" { *c } else { c * speed })).collect()
+}
+
+fn scaled_total(p: &crate::Profile, model: &CostModel, speed: f64) -> f64 {
+    p.op_totals()
+        .iter()
+        .map(|(op, c)| c * model.coefficient(op) * if op_group(op) == "database" { 1.0 } else { speed })
+        .sum()
 }
 
 /// Fits a cost model to some pages' equations.
@@ -732,12 +772,23 @@ pub struct Eval {
     pub line_rho: f64,
 }
 
+/// Section, block and snippet totals by `kind:name`.
+fn named_totals(sm: &crate::report::Summary) -> HashMap<String, f64> {
+    let mut m = HashMap::new();
+    for (kind, rows) in [("section", &sm.sections), ("block", &sm.blocks), ("snippet", &sm.snippets)] {
+        for r in rows {
+            m.insert(format!("{kind}:{}", r.key), r.total_us);
+        }
+    }
+    m
+}
+
 fn evaluate(s: &Sample, d: &SampleData, model: &CostModel) -> Eval {
     let sim = crate::speedscope::from_profile(&d.profile, model);
-    let estimate_us = sim.total_us() * d.speed;
+    let estimate_us = scaled_total(&d.profile, model, d.speed);
     let real_us = s.real.total_us();
     // Lines: every line with at least 0.1% of the real time; one lq didn't render counts as zero.
-    let real = self_by_key(&s.real);
+    let real = &d.real_self;
     let sim_self = self_by_key(&sim);
     let pairs: Vec<(f64, f64)> = real
         .iter()
@@ -745,17 +796,7 @@ fn evaluate(s: &Sample, d: &SampleData, model: &CostModel) -> Eval {
         .map(|(k, v)| (*v, sim_self.get(k).copied().unwrap_or(0.0)))
         .collect();
     // Sections, blocks and snippets: every one with at least 0.2% of the real time.
-    let (rs, ss) = (crate::report::summarize(&s.real, None), crate::report::summarize(&sim, None));
-    let named = |sm: &crate::report::Summary| -> HashMap<String, f64> {
-        let mut m = HashMap::new();
-        for (kind, rows) in [("section", &sm.sections), ("block", &sm.blocks), ("snippet", &sm.snippets)] {
-            for r in rows {
-                m.insert(format!("{kind}:{}", r.key), r.total_us);
-            }
-        }
-        m
-    };
-    let (rn, sn) = (named(&rs), named(&ss));
+    let (rn, sn) = (&d.real_named, named_totals(&crate::report::summarize(&sim, None)));
     let sec: Vec<(f64, f64)> =
         rn.iter().filter(|(_, v)| **v >= 0.002 * real_us).map(|(k, v)| (*v, sn.get(k).copied().unwrap_or(0.0) * d.speed)).collect();
     Eval {
@@ -798,8 +839,9 @@ pub fn report(c: &Calibration) -> String {
     if held {
         let _ = writeln!(
             o,
-            "held out: each page estimated by costs fitted on the other pages only, which is how the costs\n\
-             will do on pages you haven't captured. sections ρ is held out too. Mean held-out error:"
+            "held out: each page estimated by costs fitted on the other pages only (all captures of a page are\n\
+             held out together), which is how the costs will do on pages you haven't captured. sections ρ is\n\
+             held out too. Mean held-out error:"
         );
         for (m, err) in &c.modes_tried {
             let _ = writeln!(o, "  {:<58}{:>5.0}%{}", m.describe(), err * 100.0, if *m == c.choice { "  (chosen)" } else { "" });

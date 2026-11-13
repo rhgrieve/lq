@@ -55,6 +55,8 @@ pub struct Renderer<'t> {
     pub loop_shapes: HashMap<String, usize>,
     /// The page's template, such as `product`, for page-specific loop counts.
     pub page: String,
+    /// The handle of the page's product, collection or article, for per-URL loop counts.
+    pub page_handle: Option<String>,
     /// `file:line` of each loop rendered → the expression it iterates, for fitting the mock shop.
     pub loop_sources: HashMap<String, String>,
     pub errors: Vec<String>,
@@ -96,6 +98,7 @@ impl<'t> Renderer<'t> {
             translations,
             loop_shapes: HashMap::new(),
             page: String::new(),
+            page_handle: None,
             loop_sources: HashMap::new(),
             errors: Vec::new(),
             loaded: HashSet::new(),
@@ -744,8 +747,16 @@ impl<'t> Renderer<'t> {
             self.loop_sources.insert(key.clone(), text);
         }
         // A count for this page first (`product|snippets/card:12`), then for every page.
+        // A count for this URL (`collection@hats|...`), then this page type (`collection|...`), then
+        // every page.
         let page_key = format!("{}|{key}", self.page);
-        if let Some(&n) = self.loop_shapes.get(&page_key).or_else(|| self.loop_shapes.get(&key)) {
+        let url_key = self.page_handle.as_ref().map(|h| format!("{}@{h}|{key}", self.page));
+        let shape = url_key
+            .and_then(|k| self.loop_shapes.get(&k))
+            .or_else(|| self.loop_shapes.get(&page_key))
+            .or_else(|| self.loop_shapes.get(&key))
+            .copied();
+        if let Some(n) = shape {
             if items.is_empty() {
                 items = vec![Value::Nil; n];
             } else {

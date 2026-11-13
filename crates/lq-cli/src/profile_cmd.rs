@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 const HELP: &str = "\
 Usage: lq profile [options]
        lq profile init [--path <theme>] [--set <name>=<value>]... [--force]
-       lq profile calibrate [--path <theme>] [--dry-run] [--model grouped|per-op] <page>=<speedscope.json>...
+       lq profile calibrate [--path <theme>] [--dry-run] [--model grouped|per-op] <page>[@handle]=<speedscope.json>...
        lq profile analyze <speedscope.json>
 
 Estimates how long Shopify's renderer spends executing a page's Liquid, without a store or a
@@ -47,6 +47,10 @@ calibrate also refits these sizes from how often the real profiles' loops ran, a
 
 calibrate reads real profiles, captured once with
   shopify theme profile --url <path> --json > real/product.json
+Name the page type, and the handle when it's a product, collection or page, so that page keeps its
+own loop counts: product@abbott-hoodie=real/abbott.json. Capture each page two or three times after a
+warm-up request: the same page can take twice as long from one request to the next. Captures of a
+page are held out together when calibrate checks itself.
 and writes <path>/.lq/profile-costs.json and <path>/.lq/profile-shapes.json (loop counts seen on the
 real store). Keep real profiles out of version control if they come from a client's store.
 ";
@@ -404,11 +408,16 @@ fn run_calibrate(a: &Args) -> Result<i32, String> {
     let model = load_costs(a)?;
     let mut samples = Vec::new();
     for p in &a.positional {
-        let (page, file) = p.split_once('=').ok_or_else(|| format!("expected <page>=<file>, got '{p}'"))?;
+        let (page, file) = p.split_once('=').ok_or_else(|| format!("expected <page>[@handle]=<file>, got '{p}'"))?;
+        // `collection@hats=...`: a specific page, so its loops keep their own counts.
+        let (page, handle) = match page.split_once('@') {
+            Some((t, h)) => (t, Some(h.to_string())),
+            None => (page, a.handle.clone()),
+        };
         let text = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
         let real = speedscope::read(&text).map_err(|e| format!("{file}: {e}"))?;
         samples.push(Sample {
-            page: PageRequest { template: page.to_string(), handle: a.handle.clone() },
+            page: PageRequest { template: page.to_string(), handle },
             real,
             label: format!("{page} ({})", Path::new(file).file_name().unwrap_or_default().to_string_lossy()),
         });

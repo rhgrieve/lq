@@ -172,3 +172,23 @@ fn calibration_fits_mock_shop_sizes() {
     assert_eq!(knobs.images_per_product, 12, "{:?}", c.knob_changes);
     assert_eq!(knobs.variants_per_product, 20, "{:?}", c.knob_changes);
 }
+
+#[test]
+fn loop_counts_prefer_the_url_then_the_page_type() {
+    let theme = Theme::from_files(vec![
+        ("layout/theme.liquid".into(), "{{ content_for_layout }}".into()),
+        ("templates/collection.liquid".into(), "{% for p in collection.products %}x{% endfor %}".into()),
+    ]);
+    let model = CostModel::builtin();
+    let mut shapes = HashMap::new();
+    shapes.insert("templates/collection:1".to_string(), 2);
+    shapes.insert("collection|templates/collection:1".to_string(), 3);
+    shapes.insert("collection@hats|templates/collection:1".to_string(), 5);
+    let run = |handle: Option<&str>| {
+        let req = PageRequest { template: "collection".into(), handle: handle.map(String::from) };
+        render_page(&theme, &shop(), &req, &model, Limits::default(), &shapes).unwrap().html
+    };
+    assert_eq!(run(Some("hats")), "xxxxx");
+    assert_eq!(run(Some("other")), "xxx");
+    assert_eq!(run(None), "xxx");
+}
