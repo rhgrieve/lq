@@ -4,9 +4,10 @@
 //!    times on the real store than against the mock shop, lq records the real count so later
 //!    renders iterate as often (`loop_shapes`). This needs no timing, and runs until stable.
 //! 2. **Cost.** With the shapes fixed, each matched line gives one equation: its real own time
-//!    against lq's operation counts on that line. A non-negative least-squares fit, pulled lightly
-//!    towards the current coefficients so ops with little data keep sensible values, gives the
-//!    new cost model.
+//!    against lq's operation counts on that line, plus one per page total. Two models are fitted:
+//!    a multiplier per kind of cost, and a cost per operation on top of it. With two or more
+//!    pages, each page is estimated by a model fitted on the others, and the model that predicts
+//!    those held-out pages better is kept. Fewer parameters usually win: they generalize.
 
 use crate::cost::CostModel;
 use crate::interp::Limits;
@@ -33,12 +34,20 @@ pub struct PageFit {
     pub spearman: f64,
     /// The same, with the costs calibration started from.
     pub spearman_before: f64,
+    /// Rank correlation of section, block and snippet totals, with the final costs.
+    pub section_rho: f64,
+    /// This page's estimate from costs fitted on the other pages only.
+    pub held_out_ms: Option<f64>,
+    pub held_out_section_rho: Option<f64>,
     /// How fast this capture ran against the first, from lines doing the same work in both.
     pub speed: f64,
 }
 
 pub struct Calibration {
     pub model: CostModel,
+    pub choice: Choice,
+    /// The best pull for each model tried, with its mean held-out error on page totals.
+    pub modes_tried: Vec<(Choice, f64)>,
     pub shapes: HashMap<String, usize>,
     pub pages: Vec<PageFit>,
     pub shape_changes: Vec<String>,
@@ -280,6 +289,7 @@ pub fn calibrate(
     prior: &CostModel,
     limits: Limits,
     shapes: HashMap<String, usize>,
+    force: Option<Mode>,
 ) -> Result<Calibration, String> {
     let mut shapes = shapes;
     let mut shape_changes = Vec::new();
@@ -320,177 +330,413 @@ pub fn calibrate(
         }
     }
 
-    // 2. Costs. One row per matched line across all samples.
-    let mut rows: Vec<(HashMap<String, f64>, f64)> = Vec::new();
-    let mut before = Vec::new();
-    let mut unmatched_acc: HashMap<String, f64> = HashMap::new();
-    let mut sims = Vec::new();
-    let mut totals: Vec<(HashMap<String, f64>, f64)> = Vec::new();
+    // 2. Costs. Render each page once with the final shop and shapes, and collect its equations.
     let speeds = capture_speeds(samples);
+    let mut data = Vec::new();
+    let mut unmatched_acc: HashMap<String, f64> = HashMap::new();
     for (si, s) in samples.iter().enumerate() {
-        let speed = speeds[si];
-        let res = render_page(theme, shop, &s.page, prior, limits, &shapes)?;
-        let p = &res.profile;
-        let keys = attribution(&crate::speedscope::from_profile(p, prior));
-        let mut counts: HashMap<Key, HashMap<String, f64>> = HashMap::new();
-        for (i, n) in p.nodes.iter().enumerate() {
-            let e = counts.entry(keys[i].clone()).or_default();
-            for &(op, c) in &n.counts {
-                *e.entry(p.ops.name(op).to_string()).or_default() += c;
-            }
-        }
-        let real = self_by_key(&s.real);
-        for (key, y) in &real {
-            match counts.get(key) {
-                Some(x) => rows.push((x.clone(), *y / speed)),
-                None => {
-                    // Frames lq never rendered: app blocks, Shopify's own wrappers, untouched branches.
-                    let f = s.real.frames.iter().find(|f| &match_key(f) == key);
-                    let label = match f {
-                        Some(f) if f.line > 0 => format!("{}:{}  {}", f.file, f.line, f.name),
-                        _ if key.0.is_empty() => "(page wrappers: json_template, raw_section)".to_string(),
-                        _ => key.0.clone(),
-                    };
-                    *unmatched_acc.entry(label).or_default() += y;
-                }
-            }
-        }
-        before.push(p.total(prior));
-        let mut all: HashMap<String, f64> = HashMap::new();
-        for x in counts.values() {
-            for (op, c) in x {
-                *all.entry(op.clone()).or_default() += c;
-            }
-        }
-        totals.push((all, s.real.total_us() / speed));
-        sims.push((res.profile, counts));
+        data.push(sample_data(theme, shop, s, prior, limits, &shapes, speeds[si], &mut unmatched_acc)?);
     }
 
-    // Each page's total is one more equation, weighted so the fit can't trade the page total away
-    // for a closer fit on individual lines.
-    let weight = (rows.len() as f64).sqrt().max(1.0);
-    for (x, y) in totals {
-        rows.push((x.into_iter().map(|(k, v)| (k, v * weight)).collect(), y * weight));
+    // 3. Choose the model, and how strongly to pull costs towards the defaults, by how well each
+    // predicts pages it wasn't fitted on (leave one page out, for every page).
+    let modes: Vec<Mode> = match force {
+        Some(m) => vec![m],
+        None => vec![Mode::Grouped, Mode::PerOp],
+    };
+    let mut held_out: Vec<(Choice, Vec<Eval>)> = Vec::new();
+    if samples.len() >= 2 {
+        for &mode in &modes {
+            for pull in PULLS {
+                let choice = Choice { mode, pull };
+                let evals = (0..samples.len())
+                    .map(|i| {
+                        let train: Vec<&SampleData> = data.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, d)| d).collect();
+                        let m = fit(prior, &train, choice);
+                        evaluate(&samples[i], &data[i], &m)
+                    })
+                    .collect();
+                held_out.push((choice, evals));
+            }
+        }
     }
-    // Columns: every op seen. Coordinate descent on the ridge-to-prior NNLS objective.
-    let ops: Vec<String> = rows.iter().flat_map(|(x, _)| x.keys().cloned()).collect::<BTreeSet<_>>().into_iter().collect();
-    let col = |r: &HashMap<String, f64>, j: usize| r.get(&ops[j]).copied().unwrap_or(0.0);
-    let mut c: Vec<f64> = ops.iter().map(|o| prior.coefficient(o)).collect();
-    let p: Vec<f64> = c.clone();
-    let diag: Vec<f64> = (0..ops.len()).map(|j| rows.iter().map(|(x, _)| col(x, j).powi(2)).sum()).collect();
-    // An op seen on only a few lines can't be told apart from whatever else those lines do, so
-    // it stays close to its current value; well-supported ops move freely.
-    // On a tiny profile every op is rare, so the bar scales down with the number of lines.
-    let min_support = MIN_SUPPORT.min((rows.len() / 3).max(1));
-    let support: Vec<usize> = (0..ops.len()).map(|j| rows.iter().filter(|(x, _)| col(x, j) != 0.0).count()).collect();
-    let lambda: Vec<f64> = diag
+    let score = |evals: &[Eval]| evals.iter().map(|e| e.total_error.abs()).sum::<f64>() / evals.len().max(1) as f64;
+    // Ties go to the simpler model and the stronger pull.
+    let choice = held_out
         .iter()
-        .zip(&support)
-        .map(|(d, &s)| if s >= min_support { 0.1 * d + 1e-9 } else { 20.0 * d + 1e-9 })
-        .collect();
-    // How far each cost may move from where it started. Pure computation (filters, lookups,
-    // iterations, output) behaves alike on every store; database work and loading vary more. The
-    // bounds stop the fit from handing time it can't explain to whichever cheap op shares a line.
-    let (lo, hi): (Vec<f64>, Vec<f64>) = ops
-        .iter()
-        .zip(&p)
-        .map(|(op, &prior)| {
-            let wide = ["db:", "load:", "preload:", "global:"].iter().any(|x| op.starts_with(x))
-                || matches!(op.as_str(), "template_load" | "section" | "render" | "include" | "block");
-            let f = if wide { 20.0 } else { 10.0 };
-            (prior / f, (prior * f).max(1.0))
+        .min_by(|a, b| {
+            score(&a.1)
+                .total_cmp(&score(&b.1))
+                .then((a.0.mode == Mode::PerOp).cmp(&(b.0.mode == Mode::PerOp)))
+                .then(b.0.pull.total_cmp(&a.0.pull))
         })
-        .unzip();
-    let mut resid: Vec<f64> = rows.iter().map(|(x, y)| (0..ops.len()).map(|j| col(x, j) * c[j]).sum::<f64>() - y).collect();
-    for _sweep in 0..300 {
+        .map_or(Choice { mode: modes[0], pull: 0.5 }, |h| h.0);
+    let all: Vec<&SampleData> = data.iter().collect();
+    let mut model = fit(prior, &all, choice);
+    model.calibrated = true;
+    model.source = format!("calibrated on {} profile(s), {}", samples.len(), choice.describe());
+
+    // 4. Fit report.
+    let chosen = held_out.iter().find(|h| h.0 == choice).map(|h| &h.1);
+    let mut pages = Vec::new();
+    for (i, s) in samples.iter().enumerate() {
+        let before = evaluate(s, &data[i], prior);
+        let after = evaluate(s, &data[i], &model);
+        let ho = chosen.map(|c| &c[i]);
+        pages.push(PageFit {
+            label: s.label.clone(),
+            real_ms: s.real.total_us() / 1000.0,
+            before_ms: before.estimate_us / 1000.0,
+            after_ms: after.estimate_us / 1000.0,
+            held_out_ms: ho.map(|e| e.estimate_us / 1000.0),
+            matched_share: data[i].matched_share,
+            spearman: after.line_rho,
+            spearman_before: before.line_rho,
+            section_rho: after.section_rho,
+            held_out_section_rho: ho.map(|e| e.section_rho),
+            speed: data[i].speed,
+        });
+    }
+    // The best pull for each model, for the report.
+    let mut modes_tried: Vec<(Choice, f64)> = Vec::new();
+    for &mode in &modes {
+        if let Some(best) = held_out.iter().filter(|h| h.0.mode == mode).min_by(|a, b| score(&a.1).total_cmp(&score(&b.1))) {
+            modes_tried.push((best.0, score(&best.1)));
+        }
+    }
+    let mut unmatched: Vec<(String, f64)> = unmatched_acc.into_iter().collect();
+    unmatched.sort_by(|a, b| b.1.total_cmp(&a.1));
+    unmatched.truncate(15);
+    let shop_json = fitted.map(|(_, j)| j);
+    Ok(Calibration { model, choice, modes_tried, shapes, pages, shape_changes, unmatched, knob_changes, shop_json })
+}
+
+/// A model and how strongly its costs are pulled towards where they started.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Choice {
+    pub mode: Mode,
+    pub pull: f64,
+}
+
+impl Choice {
+    pub fn describe(&self) -> String {
+        let pull = match self.pull {
+            p if p <= 0.03 => "light",
+            p if p <= 0.2 => "medium",
+            p if p <= 1.0 => "strong",
+            _ => "very strong",
+        };
+        format!("{}, {pull} pull to the defaults", self.mode.describe())
+    }
+}
+
+const PULLS: [f64; 4] = [0.02, 0.1, 0.5, 3.0];
+
+/// How a cost model is fitted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// One multiplier per kind of cost, keeping the built-in ratios within each: few parameters,
+    /// so it holds up on pages it wasn't fitted on.
+    Grouped,
+    /// The grouped fit, then each operation's own cost, kept close to it.
+    PerOp,
+}
+
+impl Mode {
+    pub fn parse(s: &str) -> Option<Mode> {
+        match s {
+            "grouped" => Some(Mode::Grouped),
+            "per-op" => Some(Mode::PerOp),
+            _ => None,
+        }
+    }
+
+    pub fn describe(self) -> &'static str {
+        match self {
+            Mode::Grouped => "one multiplier per kind of cost",
+            Mode::PerOp => "a cost per operation",
+        }
+    }
+}
+
+/// The kind of cost an operation is, for the grouped fit.
+pub fn op_group(op: &str) -> &'static str {
+    if ["db:", "load:", "preload:"].iter().any(|p| op.starts_with(p)) {
+        "database"
+    } else if op.starts_with("global:") {
+        "platform"
+    } else if op.starts_with("filter:") {
+        "filters"
+    } else if matches!(op, "template_load" | "template" | "section" | "render" | "include" | "block") {
+        "templates"
+    } else if matches!(op, "output_byte" | "string_byte") {
+        "output"
+    } else {
+        "logic"
+    }
+}
+
+type Row = (HashMap<String, f64>, f64);
+
+/// One page's equations: a row per matched line (lq's op counts against the real own time) and a
+/// row for the page total, with times divided by the capture's speed.
+struct SampleData {
+    rows: Vec<Row>,
+    total: Row,
+    profile: crate::Profile,
+    matched_share: f64,
+    speed: f64,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_data(
+    theme: &Theme,
+    shop: &Shop,
+    s: &Sample,
+    prior: &CostModel,
+    limits: Limits,
+    shapes: &HashMap<String, usize>,
+    speed: f64,
+    unmatched_acc: &mut HashMap<String, f64>,
+) -> Result<SampleData, String> {
+    let res = render_page(theme, shop, &s.page, prior, limits, shapes)?;
+    let p = &res.profile;
+    let keys = attribution(&crate::speedscope::from_profile(p, prior));
+    let mut counts: HashMap<Key, HashMap<String, f64>> = HashMap::new();
+    for (i, n) in p.nodes.iter().enumerate() {
+        let e = counts.entry(keys[i].clone()).or_default();
+        for &(op, c) in &n.counts {
+            *e.entry(p.ops.name(op).to_string()).or_default() += c;
+        }
+    }
+    let real = self_by_key(&s.real);
+    let real_total: f64 = real.values().sum();
+    let mut rows = Vec::new();
+    let mut matched = 0.0;
+    for (key, y) in &real {
+        match counts.get(key) {
+            Some(x) => {
+                rows.push((x.clone(), *y / speed));
+                matched += y;
+            }
+            None => {
+                // Frames lq never rendered: app blocks, Shopify's own wrappers, untouched branches.
+                let f = s.real.frames.iter().find(|f| &match_key(f) == key);
+                let label = match f {
+                    Some(f) if f.line > 0 => format!("{}:{}  {}", f.file, f.line, f.name),
+                    _ if key.0.is_empty() => "(page wrappers: json_template, raw_section)".to_string(),
+                    _ => key.0.clone(),
+                };
+                *unmatched_acc.entry(label).or_default() += y;
+            }
+        }
+    }
+    let mut all: HashMap<String, f64> = HashMap::new();
+    for x in counts.values() {
+        for (op, c) in x {
+            *all.entry(op.clone()).or_default() += c;
+        }
+    }
+    Ok(SampleData {
+        rows,
+        total: (all, s.real.total_us() / speed),
+        profile: res.profile,
+        matched_share: if real_total > 0.0 { matched / real_total } else { 0.0 },
+        speed,
+    })
+}
+
+/// Non-negative least squares with a pull towards `prior` and per-column bounds, by coordinate
+/// descent. `rows` are dense over the columns.
+fn solve(rows: &[(Vec<f64>, f64)], prior: &[f64], lambda: &[f64], lo: &[f64], hi: &[f64]) -> Vec<f64> {
+    let n = prior.len();
+    let mut c = prior.to_vec();
+    let diag: Vec<f64> = (0..n).map(|j| rows.iter().map(|(x, _)| x[j] * x[j]).sum()).collect();
+    let mut resid: Vec<f64> = rows.iter().map(|(x, y)| x.iter().zip(&c).map(|(a, b)| a * b).sum::<f64>() - y).collect();
+    for _sweep in 0..500 {
         let mut moved = 0.0f64;
-        for j in 0..ops.len() {
+        for j in 0..n {
             if diag[j] == 0.0 {
                 continue;
             }
-            // Residual without column j's contribution.
-            let mut num = lambda[j] * p[j];
+            let mut num = lambda[j] * prior[j];
             for (i, (x, _)) in rows.iter().enumerate() {
-                let xj = col(x, j);
-                if xj != 0.0 {
-                    num -= xj * (resid[i] - xj * c[j]);
+                if x[j] != 0.0 {
+                    num -= x[j] * (resid[i] - x[j] * c[j]);
                 }
             }
             let new = (num / (diag[j] + lambda[j])).clamp(lo[j], hi[j]);
             let delta = new - c[j];
             if delta != 0.0 {
                 for (i, (x, _)) in rows.iter().enumerate() {
-                    resid[i] += col(x, j) * delta;
+                    resid[i] += x[j] * delta;
                 }
-                moved = moved.max(delta.abs() / (c[j].abs() + 1e-6));
+                moved = moved.max(delta.abs() / (c[j].abs() + 1e-9));
                 c[j] = new;
             }
         }
-        if moved < 1e-6 {
+        if moved < 1e-7 {
             break;
         }
     }
+    c
+}
+
+/// Fits a cost model to some pages' equations.
+fn fit(prior: &CostModel, data: &[&SampleData], choice: Choice) -> CostModel {
+    let (mode, pull) = (choice.mode, choice.pull);
+    let mut rows: Vec<&Row> = data.iter().flat_map(|d| d.rows.iter()).collect();
+    // Each page's total is one more equation, weighted so the fit can't trade a page's total away
+    // for a closer fit on individual lines.
+    let weight = (rows.len() as f64).sqrt().max(1.0);
+    let totals: Vec<Row> = data
+        .iter()
+        .map(|d| (d.total.0.iter().map(|(k, v)| (k.clone(), v * weight)).collect(), d.total.1 * weight))
+        .collect();
+    rows.extend(totals.iter());
+
+    // Stage 1: a multiplier per group, over the prior's own costs.
+    let groups = ["logic", "filters", "output", "templates", "database", "platform"];
+    let dense: Vec<(Vec<f64>, f64)> = rows
+        .iter()
+        .map(|(x, y)| {
+            let mut v = vec![0.0; groups.len()];
+            for (op, c) in x {
+                let g = groups.iter().position(|g| *g == op_group(op)).unwrap();
+                v[g] += c * prior.coefficient(op);
+            }
+            (v, *y)
+        })
+        .collect();
+    let ones = vec![1.0; groups.len()];
+    let diag: Vec<f64> = (0..groups.len()).map(|j| dense.iter().map(|(x, _)| x[j] * x[j]).sum()).collect();
+    let lambda: Vec<f64> = diag.iter().map(|d| pull * d + 1e-9).collect();
+    let m = solve(&dense, &ones, &lambda, &vec![0.05; groups.len()], &vec![20.0; groups.len()]);
     let mut model = prior.clone();
+    let ops: Vec<String> = rows.iter().flat_map(|(x, _)| x.keys().cloned()).collect::<BTreeSet<_>>().into_iter().collect();
+    for op in &ops {
+        let g = groups.iter().position(|g| *g == op_group(op)).unwrap();
+        model.coefficients.insert(op.clone(), prior.coefficient(op) * m[g]);
+    }
+    if mode == Mode::Grouped {
+        return model;
+    }
+
+    // Stage 2: each op's cost, starting from and pulled towards the grouped fit, within bounds.
+    let base: Vec<f64> = ops.iter().map(|o| model.coefficient(o)).collect();
+    let dense: Vec<(Vec<f64>, f64)> =
+        rows.iter().map(|(x, y)| (ops.iter().map(|o| x.get(o).copied().unwrap_or(0.0)).collect(), *y)).collect();
+    let diag: Vec<f64> = (0..ops.len()).map(|j| dense.iter().map(|(x, _)| x[j] * x[j]).sum()).collect();
+    // An op seen on only a few lines can't be told apart from whatever else those lines do, so it
+    // stays close to the grouped fit. On a tiny profile every op is rare, so the bar scales down.
+    let min_support = MIN_SUPPORT.min((rows.len() / 3).max(1));
+    let support: Vec<usize> = (0..ops.len()).map(|j| dense.iter().filter(|(x, _)| x[j] != 0.0).count()).collect();
+    let lambda: Vec<f64> =
+        diag.iter().zip(&support).map(|(d, &s)| if s >= min_support { (pull * 5.0).max(0.1) * d + 1e-9 } else { 20.0 * d + 1e-9 }).collect();
+    // How far each cost may move. Computation (filters, lookups, iterations) behaves alike across
+    // stores; database work and loading vary more. Bounds stop the fit from handing time it can't
+    // explain to whichever cheap op shares a line.
+    let (lo, hi): (Vec<f64>, Vec<f64>) = ops
+        .iter()
+        .zip(&base)
+        .map(|(op, &b)| {
+            let f = if matches!(op_group(op), "database" | "platform" | "templates") { 4.0 } else { 3.0 };
+            (b / f, (b * f).max(1e-3))
+        })
+        .unzip();
+    let c = solve(&dense, &base, &lambda, &lo, &hi);
     for (j, op) in ops.iter().enumerate() {
         model.coefficients.insert(op.clone(), c[j]);
     }
-    model.calibrated = true;
-    model.source = format!("calibrated on {} profile(s)", samples.len());
+    model
+}
 
-    // 3. Fit report.
-    let mut pages = Vec::new();
-    for (i, s) in samples.iter().enumerate() {
-        let (profile, counts) = &sims[i];
-        let real = self_by_key(&s.real);
-        let real_total: f64 = real.values().sum();
-        let matched: f64 = real.iter().filter(|(k, _)| counts.contains_key(*k)).map(|(_, v)| v).sum();
-        // Every line with at least 0.1% of the real time; one lq didn't render counts as zero.
-        let rho = |m: &CostModel| {
-            let sim_self = self_by_key(&crate::speedscope::from_profile(profile, m));
-            let pairs: Vec<(f64, f64)> = real
-                .iter()
-                .filter(|(k, v)| **v >= 0.001 * real_total && k.1 > 0)
-                .map(|(k, v)| (*v, sim_self.get(k).copied().unwrap_or(0.0)))
-                .collect();
-            spearman(&pairs)
-        };
-        pages.push(PageFit {
-            label: s.label.clone(),
-            real_ms: s.real.total_us() / 1000.0,
-            before_ms: before[i] * speeds[i] / 1000.0,
-            after_ms: profile.total(&model) * speeds[i] / 1000.0,
-            matched_share: if real_total > 0.0 { matched / real_total } else { 0.0 },
-            spearman: rho(&model),
-            spearman_before: rho(prior),
-            speed: speeds[i],
-        });
+/// How a model does on one page: its estimate (at the capture's speed) and the error against the
+/// real total, and how well it ranks sections and snippets, and lines.
+pub struct Eval {
+    pub estimate_us: f64,
+    pub total_error: f64,
+    pub section_rho: f64,
+    pub line_rho: f64,
+}
+
+fn evaluate(s: &Sample, d: &SampleData, model: &CostModel) -> Eval {
+    let sim = crate::speedscope::from_profile(&d.profile, model);
+    let estimate_us = sim.total_us() * d.speed;
+    let real_us = s.real.total_us();
+    // Lines: every line with at least 0.1% of the real time; one lq didn't render counts as zero.
+    let real = self_by_key(&s.real);
+    let sim_self = self_by_key(&sim);
+    let pairs: Vec<(f64, f64)> = real
+        .iter()
+        .filter(|(k, v)| **v >= 0.001 * real_us && k.1 > 0)
+        .map(|(k, v)| (*v, sim_self.get(k).copied().unwrap_or(0.0)))
+        .collect();
+    // Sections, blocks and snippets: every one with at least 0.2% of the real time.
+    let (rs, ss) = (crate::report::summarize(&s.real, None), crate::report::summarize(&sim, None));
+    let named = |sm: &crate::report::Summary| -> HashMap<String, f64> {
+        let mut m = HashMap::new();
+        for (kind, rows) in [("section", &sm.sections), ("block", &sm.blocks), ("snippet", &sm.snippets)] {
+            for r in rows {
+                m.insert(format!("{kind}:{}", r.key), r.total_us);
+            }
+        }
+        m
+    };
+    let (rn, sn) = (named(&rs), named(&ss));
+    let sec: Vec<(f64, f64)> =
+        rn.iter().filter(|(_, v)| **v >= 0.002 * real_us).map(|(k, v)| (*v, sn.get(k).copied().unwrap_or(0.0) * d.speed)).collect();
+    Eval {
+        estimate_us,
+        total_error: if real_us > 0.0 { estimate_us / real_us - 1.0 } else { 0.0 },
+        section_rho: spearman(&sec),
+        line_rho: spearman(&pairs),
     }
-    let mut unmatched: Vec<(String, f64)> = unmatched_acc.into_iter().collect();
-    unmatched.sort_by(|a, b| b.1.total_cmp(&a.1));
-    unmatched.truncate(15);
-    let shop_json = fitted.map(|(_, j)| j);
-    Ok(Calibration { model, shapes, pages, shape_changes, unmatched, knob_changes, shop_json })
+}
+
+fn rho_text(r: f64) -> String {
+    if r.is_nan() { "-".to_string() } else { format!("{r:.2}") }
 }
 
 pub fn report(c: &Calibration) -> String {
     let mut o = String::new();
-    let _ = writeln!(o, "{:<40}{:>8}{:>10}{:>10}{:>10}{:>10}{:>10}{:>8}", "page", "speed", "real ms", "before", "after", "matched", "ρ before", "ρ after");
+    let held = c.pages.iter().any(|p| p.held_out_ms.is_some());
+    let _ = writeln!(
+        o,
+        "{:<34}{:>7}{:>9}{:>9}{:>10}{:>9}{:>9}{:>11}{:>9}",
+        "page", "speed", "real ms", "before", "held out", "after", "matched", "sections ρ", "lines ρ"
+    );
     for p in &c.pages {
+        let label: String = if p.label.chars().count() > 33 { p.label.chars().take(32).collect::<String>() + "…" } else { p.label.clone() };
         let _ = writeln!(
             o,
-            "{:<40}{:>8.2}{:>10.1}{:>10.1}{:>10.1}{:>9.0}%{:>10}{:>8}",
-            p.label,
+            "{:<34}{:>7.2}{:>9.1}{:>9.1}{:>10}{:>9.1}{:>8.0}%{:>11}{:>9}",
+            label,
             p.speed,
             p.real_ms,
             p.before_ms,
+            p.held_out_ms.map_or("-".to_string(), |h| format!("{h:.1}")),
             p.after_ms,
             p.matched_share * 100.0,
-            if p.spearman_before.is_nan() { "-".to_string() } else { format!("{:.2}", p.spearman_before) },
-            if p.spearman.is_nan() { "-".to_string() } else { format!("{:.2}", p.spearman) }
+            rho_text(p.held_out_section_rho.unwrap_or(p.section_rho)),
+            rho_text(p.spearman),
         );
     }
+    let _ = writeln!(o, "\nmodel: {}.", c.choice.describe());
+    if held {
+        let _ = writeln!(
+            o,
+            "held out: each page estimated by costs fitted on the other pages only, which is how the costs\n\
+             will do on pages you haven't captured. sections ρ is held out too. Mean held-out error:"
+        );
+        for (m, err) in &c.modes_tried {
+            let _ = writeln!(o, "  {:<58}{:>5.0}%{}", m.describe(), err * 100.0, if *m == c.choice { "  (chosen)" } else { "" });
+        }
+    } else {
+        let _ = writeln!(o, "Capture two or more pages to check how the costs do on pages they weren't fitted on.");
+    }
     if c.pages.len() > 1 {
-        let _ = writeln!(o, "\nspeed: how fast each capture ran against the first, from lines doing the same work. Times are\nscaled by it, as captures of the same code vary.");
+        let _ = writeln!(o, "speed: how fast each capture ran against the first, from lines doing the same work. Times are\nscaled by it, as captures of the same code vary.");
     }
     if !c.knob_changes.is_empty() {
         let _ = writeln!(o, "\nMock shop sizes taken from the real profiles' loops:");

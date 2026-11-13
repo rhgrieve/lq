@@ -244,7 +244,11 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
   `lq profile calibrate product=real/product.json collection=real/collection.json`. lq matches frames by template and
   line, resizes the mock shop to the real catalogue from how often loops ran (variants, images, countries,
   menus, ...: `.lq/shop.json`), takes the remaining loops' real iteration counts (`.lq/profile-shapes.json`), and
-  fits the costs (`.lq/profile-costs.json`). It reports how close the fit is per page. Calibrate against the files of the theme you
+  fits the costs (`.lq/profile-costs.json`). Calibrate fits two models, one multiplier per kind of cost (6 numbers) and a cost per
+  operation, at several strengths of pull towards the defaults. With two or more pages it estimates each page with costs
+  fitted on the others only, and keeps whichever model and strength predict those held-out pages best. The report shows
+  that held-out estimate per page, which is how the costs will do on pages you haven't captured. Calibrate against the
+  files of the theme you
   profiled: JSON templates edited in the theme editor usually aren't in git, so pull them first
   (`shopify theme pull --theme <id>`), or lines won't match. Real profiles of the same code vary: one capture can
   run 1.5× slower than another. calibrate estimates each capture's speed from lines doing the same work and scales it
@@ -254,8 +258,10 @@ call, and `liquid_template`, `section` and `raw_section` around each template, a
 - `lq profile analyze real.json --path <theme>` gives the same report for a real profile, with each line's code taken
   from the theme, since Shopify's frames only name the tag.
 
-On a real store, calibrated on two pages, lq's estimate of a third page's total came within 2–31%, after scaling out
-how fast each capture ran. Time per section and per snippet follows the real profile; time per individual line doesn't,
+On a real store with three captured pages, the held-out estimates of page totals were off by 14% on average, after
+scaling out how fast each capture ran, and ranked sections and snippets at ρ 0.71–0.79. The built-in costs are hand
+estimates moved halfway towards that one store's fit (`data/profile-costs.json` says how), so uncalibrated times are
+rough: 14–44% low on that store. Time per section and per snippet follows the real profile; time per individual line doesn't,
 since real line costs depend on data lq only approximates. So read the sections and snippets tables, and use
 `--compare` for regressions, where both sides share the same mock shop. Absolute times are estimates: lq doesn't model
 Shopify's caches, database latency or app blocks, and the mock shop is only as close to the real catalogue as its sizes.

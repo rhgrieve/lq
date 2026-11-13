@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 const HELP: &str = "\
 Usage: lq profile [options]
        lq profile init [--path <theme>] [--set <name>=<value>]... [--force]
-       lq profile calibrate [--path <theme>] [--dry-run] <page>=<speedscope.json>...
+       lq profile calibrate [--path <theme>] [--dry-run] [--model grouped|per-op] <page>=<speedscope.json>...
        lq profile analyze <speedscope.json>
 
 Estimates how long Shopify's renderer spends executing a page's Liquid, without a store or a
@@ -67,6 +67,7 @@ struct Args {
     sets: Vec<String>,
     force: bool,
     dry_run: bool,
+    model: Option<calibrate::Mode>,
     positional: Vec<String>,
 }
 
@@ -87,6 +88,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
         sets: Vec::new(),
         force: false,
         dry_run: false,
+        model: None,
         positional: Vec::new(),
     };
     let mut it = args.iter();
@@ -118,6 +120,10 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--set" => a.sets.push(value("--set")?),
             "--force" => a.force = true,
             "--dry-run" => a.dry_run = true,
+            "--model" => {
+                let v = value("--model")?;
+                a.model = Some(calibrate::Mode::parse(&v).ok_or_else(|| format!("unknown --model '{v}': use grouped or per-op"))?);
+            }
             f if f.starts_with('-') => return Err(format!("unknown option {f}")),
             _ => a.positional.push(arg.clone()),
         }
@@ -249,7 +255,7 @@ fn run(a: &Args) -> Result<i32, String> {
                 summary.nodes,
                 report::ms(summary.total_us)
             );
-            t.push_str(&format!("costs: {}{}; shop: {shop_source}\n\n", model.source, if model.calibrated { "" } else { " (uncalibrated)" }));
+            t.push_str(&format!("costs: {}{}; shop: {shop_source}\n\n", model.source, if model.calibrated { "" } else { ", not calibrated for this store: absolute times are rough (lq profile calibrate --help)" }));
             t.push_str(&report::text(&summary, &report::TextOptions { top: a.top }));
             if !db.is_empty() {
                 t.push_str("\nDatabase-backed reads\n");
@@ -278,7 +284,7 @@ fn run(a: &Args) -> Result<i32, String> {
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap());
     } else if !table.is_empty() {
-        println!("costs: {}{}; shop: {shop_source}\n", model.source, if model.calibrated { "" } else { " (uncalibrated)" });
+        println!("costs: {}{}; shop: {shop_source}\n", model.source, if model.calibrated { "" } else { ", not calibrated for this store: absolute times are rough (lq profile calibrate --help)" });
         println!("{:<22}{:>12}{:>10}{:>10}{:>8}", "page", "est. ms", "nodes", "db reads", "errors");
         for (p, us, nodes, db, errors) in table {
             println!("{:<22}{:>12}{:>10}{:>10}{:>8}", p, report::ms(us), nodes, db, errors);
@@ -407,7 +413,7 @@ fn run_calibrate(a: &Args) -> Result<i32, String> {
             label: format!("{page} ({})", Path::new(file).file_name().unwrap_or_default().to_string_lossy()),
         });
     }
-    let c = calibrate::calibrate(&theme, &shop, &samples, &model, limits(a), load_shapes(a))?;
+    let c = calibrate::calibrate(&theme, &shop, &samples, &model, limits(a), load_shapes(a), a.model)?;
     print!("{}", calibrate::report(&c));
     if a.dry_run {
         println!("\n--dry-run: nothing written. \"before\" is the current costs on these pages.");

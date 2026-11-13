@@ -41,7 +41,9 @@ impl CostModel {
             .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
             .unwrap_or_default();
         let calibrated = v.get("calibrated").and_then(|c| c.as_bool()).unwrap_or(false);
-        Ok(CostModel { coefficients, db_fields, calibrated, source: source.to_string() })
+        // A file can name itself; otherwise it's known by its path.
+        let source = v.get("source").and_then(|s| s.as_str()).unwrap_or(source).to_string();
+        Ok(CostModel { coefficients, db_fields, calibrated, source })
     }
 
     /// Overlays another model's coefficients, as a calibrated file over the defaults.
@@ -94,6 +96,7 @@ impl CostModel {
             .collect();
         let v = serde_json::json!({
             "calibrated": self.calibrated,
+            "source": self.source,
             "unit": "microseconds",
             "coefficients": coefficients,
             "db_fields": self.db_fields,
