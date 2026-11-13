@@ -1,0 +1,12 @@
+[package]
+name = "lq-render"
+description = "A Shopify-flavoured Liquid interpreter that estimates server-side render cost."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lq-syntax.workspace = true
+lq-json = { path = "../lq-json" }
+indexmap = "2"
+serde_json = "1"

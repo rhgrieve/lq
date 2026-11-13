@@ -772,10 +772,12 @@ dependencies = [
  "lq-check",
  "lq-fmt",
  "lq-json",
+ "lq-render",
  "lq-syntax",
  "lq-theme",
  "mimalloc",
  "rayon",
+ "serde_json",
 ]
 
 [[package]]
@@ -802,6 +804,16 @@ dependencies = [
 [[package]]
 name = "lq-json"
 version = "0.2.0"
+
+[[package]]
+name = "lq-render"
+version = "0.2.0"
+dependencies = [
+ "indexmap",
+ "lq-json",
+ "lq-syntax",
+ "serde_json",
+]
 
 [[package]]
 name = "lq-syntax"

@@ -16,4 +16,6 @@ rayon.workspace = true
 lq-check = { path = "../lq-check" }
 lq-fmt = { path = "../lq-fmt" }
 lq-json = { path = "../lq-json" }
+lq-render = { path = "../lq-render" }
+serde_json = "1"
 lq-theme = { path = "../lq-theme" }

@@ -5,6 +5,7 @@ mod all_cmd;
 mod check_cmd;
 mod explain;
 mod filter;
+mod profile_cmd;
 mod report;
 
 #[global_allocator]
@@ -24,6 +25,7 @@ Commands:
   fmt [paths...]     Format Liquid files. See `lq fmt --help`.
   all [files...]     Run check, then fmt. See `lq all --help`.
   explain <check>   What a check does, and how to configure or disable it.
+  profile            Estimate a page's Liquid render time, offline. See `lq profile --help`.
 
 Options:
   -h, --help         Print this help
@@ -36,6 +38,7 @@ const USAGE: &str = "usage: lq check [options] [files...]   (lq check --help)
        lq fmt [options] [paths...]    (lq fmt --help)
        lq all [options] [files...]    (lq all --help)
        lq explain <check>
+       lq profile [options]           (lq profile --help)
 debug: lq debug-check-golden <file> [--show <n>] [--upstream-bugs]
        lq debug-checks
        lq debug-divergences
@@ -62,6 +65,7 @@ fn run(args: &[String]) -> i32 {
         Some("fmt") => lq_fmt::cli::fmt_main(&args[1..]),
         Some("all") => all_cmd::all(&args[1..]),
         Some("explain") => explain::explain(&args[1..]),
+        Some("profile") => profile_cmd::profile(&args[1..]),
         Some("--help" | "-h" | "help") => {
             print!("{HELP}");
             0
