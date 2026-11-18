@@ -31,7 +31,7 @@ the repository's own package manager:
 ```json
 {
   "devDependencies": {
-    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.2.0/lq-theme-check-0.2.0.tgz"
+    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.3.0/lq-theme-check-0.3.0.tgz"
   }
 }
 ```

@@ -33,7 +33,7 @@ to `package.json`:
 ```json
 {
   "devDependencies": {
-    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.2.0/lq-theme-check-0.2.0.tgz"
+    "lq": "https://github.com/rhgrieve/lq/releases/download/v0.3.0/lq-theme-check-0.3.0.tgz"
   }
 }
 ```
@@ -411,7 +411,7 @@ python3 -m http.server --directory site
 ## Releasing
 
 1. Set the version in `Cargo.toml`'s `[workspace.package]`, and commit it with the updated `Cargo.lock`.
-2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+2. Tag and push: `git tag v0.3.0 && git push origin main v0.3.0`.
 
 `.github/workflows/release.yml` then builds all five platforms and runs the tests on each, packs one tarball with
 `scripts/pack-npm.mjs`, installs and runs that tarball on each platform, and attaches it to a new GitHub release. The tag
