@@ -85,6 +85,8 @@ Confirm it runs: `npx lq --version` (or `lq --version`).
 - If Prettier also formats other files, keep it for those, and change its commands or globs so they
   no longer include `.liquid` files. Don't add `*.liquid` to `.prettierignore`: lq reads that file
   too, and would skip every Liquid file.
+- lq leaves files that don't render HTML alone, such as `robots.txt.liquid` and `theme.js.liquid`, where
+  Prettier reflows them. Entries in `.prettierignore` that only protect those are no longer needed.
 - For hooks that pass staged files, add `--ignore-unknown` so non-Liquid files are skipped, or
   restrict the hook with a glob.
 

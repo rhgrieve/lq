@@ -89,6 +89,10 @@ impl Flags {
     pub(crate) fn timings(&self) -> bool {
         self.timings
     }
+
+    pub(crate) fn upstream_bugs(&self) -> bool {
+        self.upstream_bugs
+    }
 }
 
 pub const CHECK_HELP: &str = "\

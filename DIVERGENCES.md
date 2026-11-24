@@ -39,6 +39,29 @@ unexplained fails.
 | `ImgUrlPrototype` | `DeprecatedFilter` | `{{ p \| product_img_url: 'toString' }}`, `{{ p \| img_tag: 'a', 'b', 'toString' }}` | `size in NAMED_SIZES` finds `Object.prototype`: `image_url: width: function toString() { [native code] }, ...` | Own properties only: `image_url: width: 100` | "product_img_url: ...", "img_tag: ...", "control: img_url..." |
 | `AutofixAbort` | engine | `lq check --auto-correct` on a theme with a locale starting `/* ... */` that has a missing translation, plus any other fixable offense | `JSON.parse` in the JSON corrector rejects the comment, and the run stops: no fix is applied after that point, even in unrelated Liquid files. `shopify theme check --auto-correct` therefore fixes nothing on such themes | The locale is skipped with a warning on stderr, since rewriting it would drop the comment header, and every other fix is applied | `scripts/parity/autofix.mjs` |
 
+## Formatter
+
+`lq fmt` follows Prettier with the Liquid plugin, with one deliberate difference in which files it formats. `lq fmt
+--upstream-bugs` turns it off, and `lq all --upstream-bugs` passes it on. It isn't a `Divergence`, because no check is involved.
+
+**`TextFiles`.** The plugin parses every `.liquid` file as HTML, so it reflows text in files that render something else.
+That changes what they render:
+
+| File | Source | Upstream |
+|---|---|---|
+| `templates/robots.txt.liquid` | `User-agent: *⏎Disallow: /` | `User-agent: * Disallow: /`, which is one directive |
+| `assets/a.js.liquid` | `var a = 1; // note⏎var b = 2;` | `var a = 1; // note var b = 2;`, which comments out `b` |
+| `templates/page.data.json.liquid` | `{"b": "x  y"}` | `{"b": "x y"}` |
+
+`lq fmt` leaves a file alone if its name ends in `.css`, `.csv`, `.js`, `.json`, `.md`, `.sass`, `.scss` or `.txt`, then
+`.liquid`: `--check` passes it, `--write` doesn't write it, and it prints as it is. It's a list because alternate
+templates, such as `page.about.liquid`, have a dot too and are HTML. `.svg.liquid` and `.xml.liquid` are markup, and are
+formatted. A template with a plain name that renders text, such as JSON behind `{% layout none %}`, is still formatted:
+list it in `.prettierignore`.
+
+**Proof.** `node scripts/parity/fmt-config.mjs --temp DIR` runs both: `--upstream-bugs` matches Prettier on these files,
+and the default leaves each one alone and formats every other file the same.
+
 ## Presentation
 
 The table above is bugs. The default text report is a different kind of difference: a choice about how offenses are

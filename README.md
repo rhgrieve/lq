@@ -76,6 +76,7 @@ lq check --timings                    # time per phase, on stderr
 lq fmt "**/*.liquid" --check          # exit 1 if a file would change
 lq fmt "**/*.liquid" --write          # rewrite files in place
 lq fmt --stdin-filepath a.liquid      # stdin to stdout, using the config for that path
+lq fmt --upstream-bugs a.js.liquid    # format files that don't render HTML too, like Prettier
 
 lq all                                # lq check, then lq fmt --check; see "Running both"
 lq all --write                        # apply safe fixes, then format
@@ -83,7 +84,8 @@ lq all --write                        # apply safe fixes, then format
 
 `lq --help`, `lq check --help`, `lq fmt --help` and `lq all --help` list everything. `lq check` accepts upstream's offline flags. Its
 JSON is upstream's, byte for byte. Its text report is its own: see [Reports](#reports). `lq fmt` behaves like `prettier`
-for Liquid files.
+for Liquid files, except that it leaves files that don't render HTML alone, such as `robots.txt.liquid` and
+`theme.js.liquid`, because Prettier breaks them: see [DIVERGENCES.md](DIVERGENCES.md#formatter).
 
 File arguments to `lq check` narrow what is *reported*, and what decides the exit code. If other files have errors, a note on stderr says how many. The whole theme is still
 loaded, so cross-file checks stay correct: a file's offenses are the same either way. Paths may be relative to the
@@ -123,8 +125,8 @@ reports everything. The exit code is the higher of the two. If check exits 2, fo
 fmt doesn't run.
 
 `--write` is `lq all`'s only flag of its own. Every other `lq check` option works and applies to check only, except
-`--path`, which also sets the directory fmt works in. `--auto-correct`, `--init`, `--list`, `--print` and `--version`
-exit 2.
+`--path`, which also sets the directory fmt works in, and `--upstream-bugs`, which applies to both. `--auto-correct`,
+`--init`, `--list`, `--print` and `--version` exit 2.
 
 The two commands still decide separately what they cover. `ignore:` in `.theme-check.yml` doesn't affect fmt, and
 `.prettierignore` doesn't affect check. `--only`, `--skip` and `--severity` don't narrow fmt. With no file arguments, fmt
@@ -290,8 +292,8 @@ The claim, exactly:
 - **Formatter.** With embedded formatting off, output is byte-identical to Prettier on the same themes, including
   badly formatted variants of them, at widths 100, 80 and 40. On upstream's fixtures, 887 of 888 cases match with
   embedded formatting on, the other being the Markdown block below. JSON blocks go through a native port and are
-  byte-identical. JS, TS and CSS go through Biome, and differ: see below. `lq fmt --check` has the
-  same output and exit code as `prettier --check`, config resolution and ignore files included.
+  byte-identical. JS, TS and CSS go through Biome, and differ: see below. `lq fmt --upstream-bugs --check`
+  has the same output and exit code as `prettier --check`, config resolution and ignore files included.
 - **Default mode** differs from all of this only as listed in [DIVERGENCES.md](DIVERGENCES.md).
 
 Not covered: anything outside the known gaps below, naturally, and code unlike these three themes and upstream's
@@ -328,7 +330,7 @@ Then, with `cargo build --release --workspace`:
 | `node scripts/parity/fmt.mjs --width 100` (also 80, 40) | the printer, byte for byte, with embedded formatting off |
 | `node scripts/parity/fmt-classify.mjs --no-mess` | attributes every embedded difference to Biome or a bug of ours |
 | `node scripts/parity/fmt-fixtures.mjs` | the formatter on upstream's fixtures |
-| `node scripts/parity/fmt-config.mjs` | `lq fmt --check` with `prettier --check`, on a real theme |
+| `node scripts/parity/fmt-config.mjs` | `lq fmt --upstream-bugs --check` with `prettier --check`, on a real theme; with `--temp DIR`, the [formatter divergence](DIVERGENCES.md#formatter) |
 | `node scripts/parity/fmt-biome-guard.mjs` | a Biome panic falls back to verbatim, on the release binary |
 
 ### Unseen themes

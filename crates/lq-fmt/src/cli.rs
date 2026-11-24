@@ -23,6 +23,8 @@ pub struct FmtArgs {
     pub config: Option<PathBuf>,
     pub no_editorconfig: bool,
     pub ignore_unknown: bool,
+    /// Format [non-HTML files](is_text_file) as HTML, like Prettier.
+    pub upstream_bugs: bool,
     pub timings: bool,
     /// Running under `lq all`, whose stdout belongs to `lq check`: what would go to stdout goes to
     /// stderr, and files that didn't change aren't listed. No `lq fmt` flag sets this.
@@ -50,6 +52,7 @@ impl FmtArgs {
                 "--config" => out.config = Some(PathBuf::from(value(&mut i)?)),
                 "--no-editorconfig" => out.no_editorconfig = true,
                 "--ignore-unknown" | "-u" => out.ignore_unknown = true,
+                "--upstream-bugs" => out.upstream_bugs = true,
                 "--timings" => out.timings = true,
                 "--" => {
                     out.paths.extend(args[i + 1..].iter().cloned());
@@ -131,6 +134,19 @@ fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
 
 fn is_liquid(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "liquid")
+}
+
+/// What a file's name can say it renders, before `.liquid`, when that isn't HTML. A list, because
+/// alternate templates have a dot too: `page.about.liquid` is HTML.
+const TEXT_EXTENSIONS: [&str; 8] = ["css", "csv", "js", "json", "md", "sass", "scss", "txt"];
+
+/// Whether a file renders text whose line breaks matter, such as `robots.txt.liquid`. The Liquid
+/// plugin parses every file as HTML and reflows these, which joins a `//` comment in
+/// `theme.js.liquid` with the code below it.
+fn is_text_file(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| Path::new(stem).extension())
+        .is_some_and(|e| TEXT_EXTENSIONS.iter().any(|t| e.eq_ignore_ascii_case(t)))
 }
 
 /// One input of the expansion: a file, plus whether non-Liquid files are skipped silently.
@@ -327,6 +343,9 @@ pub fn run_fmt_in(cwd: &Path, args: &FmtArgs) -> i32 {
                 if ignorer.is_ignored(&e.file) {
                     return FileResult::Different(input, 0);
                 }
+                if !args.upstream_bugs && is_text_file(&e.file) {
+                    return FileResult::Unchanged(0);
+                }
                 let start = std::time::Instant::now();
                 crate::embed::biome::set_current_file(&display);
                 let result = format_source(&input, &options);
@@ -447,6 +466,12 @@ fn run_stdin(args: &FmtArgs, cwd: &Path, ignorer: &Ignorer, search: &ConfigSearc
         },
         None => Options::default(),
     };
+    if !args.upstream_bugs && absolute.as_deref().is_some_and(is_text_file) {
+        if !args.check && !args.list_different {
+            print!("{input}");
+        }
+        return 0;
+    }
     let display = args.stdin_filepath.clone().unwrap_or_else(|| "stdin".to_string());
     let result = std::thread::scope(|s| {
         std::thread::Builder::new()
@@ -773,6 +798,9 @@ Usage: lq fmt [options] [files, directories or globs...]
 With no paths, formats stdin to stdout. With paths and neither --check nor --write, prints the
 formatted files. Reads .prettierrc, .editorconfig, .prettierignore and .gitignore.
 
+Files that don't render HTML are left as they are: names ending in .css, .csv, .js, .json, .md,
+.sass, .scss or .txt, then .liquid.
+
 Options:
   -c, --check                Report files that would change; exit 1 if any
   -w, --write                Rewrite files in place
@@ -783,6 +811,7 @@ Options:
       --config <file>        Use this config instead of searching for one
       --no-editorconfig      Don't read .editorconfig
       --with-node-modules    Process files in node_modules
+      --upstream-bugs        Format files that don't render HTML too, like Prettier, which breaks them
       --timings              Print the time spent in each phase to stderr
   -h, --help                 Print this help
 
@@ -808,4 +837,27 @@ pub fn fmt_main(args: &[String]) -> i32 {
         return 2;
     }
     run_fmt(&parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_files_are_told_apart_from_alternate_templates() {
+        for p in ["templates/robots.txt.liquid", "assets/a.js.liquid", "assets/a.min.css.liquid", "a.JSON.liquid"] {
+            assert!(is_text_file(Path::new(p)), "{p}");
+        }
+        for p in [
+            "snippets/a.liquid",
+            "snippets/js.liquid",
+            "templates/page.about.liquid",
+            "templates/page.js-demo.liquid",
+            "templates/robots.txt.backup.liquid",
+            "assets.css/a.liquid",
+            "assets/icon.svg.liquid",
+        ] {
+            assert!(!is_text_file(Path::new(p)), "{p}");
+        }
+    }
 }

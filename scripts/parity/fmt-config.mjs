@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Gate 5: `lq fmt --check` against `prettier --check` on a real theme, with its own
+// Gate 5: `lq fmt --upstream-bugs --check` against `prettier --check` on a real theme, with its own
 // .prettierrc.json and .prettierignore, in Liquid scope. Read-only: neither is passed --write, and
 // Prettier gets an explicit --cache-location so it does not touch the theme's node_modules/.cache.
 // Usage: fmt-config.mjs [--theme DIR] [--temp DIR]
-//   --temp DIR   additionally runs config cases built under DIR: overrides, ignore rules, editorconfig.
+//   --temp DIR   additionally runs config cases built under DIR: overrides, ignore rules, editorconfig,
+//                and checks that the default leaves files that don't render HTML alone.
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,7 +24,7 @@ const run = (bin, argv, cwd) => {
   return { code: r.status, out: r.stdout, err: r.stderr };
 };
 const oracle = (cwd, patterns) => run('node', [PRETTIER, '--check', '--cache-location', CACHE, '--plugin', PLUGIN, ...patterns], cwd);
-const ours = (cwd, patterns) => run(lq, ['fmt', ...patterns, '--check'], cwd);
+const ours = (cwd, patterns) => run(lq, ['fmt', '--upstream-bugs', ...patterns, '--check'], cwd);
 // Prettier prints a stack for errors without a location: the first line is the comparable part.
 const noStack = (r) => ({ ...r, err: r.err.split('\n').filter((l) => !/^\[error\]\s+at /.test(l)).join('\n') });
 // lq names its own command in the --check hint: see Presentation in DIVERGENCES.md.
@@ -42,6 +43,15 @@ const compare = (label, a0, b0) => {
 };
 
 let ok = compare(`${path.basename(theme)} "**/*.liquid"`, oracle(theme, ['**/*.liquid']), ours(theme, ['**/*.liquid']));
+
+const TEXT_FILES = [
+  ['templates/robots.txt.liquid', '{%- if a -%}\nUser-agent: *\nDisallow: /\n{%- endif -%}\n'],
+  ['assets/a.js.liquid', 'var a = {{ a | json }}; // note\nvar b = 2;\n'],
+  ['assets/a.css.liquid', '.a{color:{{ c }}}\n.b{top:0}\n'],
+  ['templates/page.data.json.liquid', '{"a": {{ a | json }}, "b": "x  y"}\n'],
+  ['templates/page.list.csv.liquid', 'a,b\n1,2\n'],
+  ['templates/page.notes.md.liquid', '- a\n- b\n'],
+];
 
 // A messy project exercising overrides, ignore files and .editorconfig.
 const temp = val('--temp', null);
@@ -62,6 +72,8 @@ if (temp) {
     write(p, p === 'wide/a.liquid' ? long : messy);
   }
   write('formatted.liquid', '<div></div>\n');
+  // Files that don't render HTML: see TextFiles in DIVERGENCES.md.
+  for (const [p, c] of TEXT_FILES) write(p, c);
   write('wide/fmt.liquid', long);
   write('nested/.prettierrc', 'printWidth: 60\ntabWidth: 3\noverrides:\n  - files: "*.liquid"\n    options:\n      singleAttributePerLine: true\n');
   write('nested/a.liquid', '<div a="1" b="2"><p>x</p></div>\n');
@@ -83,10 +95,10 @@ if (temp) {
   let same = 0;
   for (const f of files.sort()) {
     const a = noStack(run('node', [PRETTIER, '--cache-location', CACHE, '--plugin', PLUGIN, f], temp));
-    const b = noStack(run(lq, ['fmt', f], temp));
+    const b = noStack(run(lq, ['fmt', '--upstream-bugs', f], temp));
     const input = fs.readFileSync(path.join(temp, f), 'utf8');
     const sa = spawnSync('node', [PRETTIER, '--cache-location', CACHE, '--plugin', PLUGIN, '--stdin-filepath', f], { cwd: temp, input, encoding: 'utf8' });
-    const sb = spawnSync(lq, ['fmt', '--stdin-filepath', f], { cwd: temp, input, encoding: 'utf8' });
+    const sb = spawnSync(lq, ['fmt', '--upstream-bugs', '--stdin-filepath', f], { cwd: temp, input, encoding: 'utf8' });
     if (a.out === b.out && a.code === b.code && sa.stdout === sb.stdout && sa.status === sb.status) same++;
     else { ok = false; console.log(`  ${f}: file exit ${a.code}/${b.code}, stdin exit ${sa.status}/${sb.status}\n   oracle ${JSON.stringify(a.out.slice(0, 300))}\n   lq     ${JSON.stringify(b.out.slice(0, 300))}\n   stdin oracle ${JSON.stringify(sa.stdout.slice(0, 300))}\n   stdin lq     ${JSON.stringify(sb.stdout.slice(0, 300))}`); }
   }
@@ -95,11 +107,19 @@ if (temp) {
   const copy = (name) => { const d = `${temp}-${name}`; fs.rmSync(d, { recursive: true, force: true }); fs.cpSync(temp, d, { recursive: true }); return d; };
   const da = copy('oracle'), db = copy('lq');
   const wa = run('node', [PRETTIER, '--write', '--cache-location', CACHE, '--plugin', PLUGIN, '**/*.liquid'], da);
-  const wb = run(lq, ['fmt', '**/*.liquid', '--write'], db);
+  const wb = run(lq, ['fmt', '--upstream-bugs', '**/*.liquid', '--write'], db);
   const tree = (d) => { const out = {}; const w = (x) => { for (const e of fs.readdirSync(x, { withFileTypes: true })) { const p = path.join(x, e.name); if (e.isDirectory()) w(p); else out[path.relative(d, p)] = fs.readFileSync(p, 'utf8'); } }; w(d); return out; };
   const ta = tree(da), tb = tree(db);
   const differing = Object.keys({ ...ta, ...tb }).filter((k) => ta[k] !== tb[k]);
   console.log(`[fmt/config] --write: exit ${wa.status ?? wa.code}/${wb.status ?? wb.code}, differing files: ${JSON.stringify(differing)}`);
   ok = ok && differing.length === 0;
+  // By default, lq leaves those files alone, where Prettier changes every one of them.
+  const dd = copy('default');
+  run(lq, ['fmt', '**/*.liquid', '--write'], dd);
+  const td = tree(dd);
+  const kept = TEXT_FILES.filter(([p, c]) => td[path.normalize(p)] === c && ta[path.normalize(p)] !== c);
+  const others = Object.keys(tb).filter((k) => td[k] !== tb[k] && !TEXT_FILES.some(([p]) => path.normalize(p) === k));
+  console.log(`[fmt/config] default: ${kept.length}/${TEXT_FILES.length} text files left alone that Prettier changes; other differences: ${JSON.stringify(others)}`);
+  ok = ok && kept.length === TEXT_FILES.length && others.length === 0;
 }
 process.exit(ok ? 0 : 1);

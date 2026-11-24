@@ -19,8 +19,9 @@ Options:
 
 Every other `lq check` option works, and applies to check only: --path, --config, --output,
 --color, --no-fold, --fail-level, --only, --skip, --severity, --upstream-bugs and --timings.
---path also sets the directory fmt works in. fmt finds its config and ignore files as usual, so
-`ignore:` in .theme-check.yml doesn't affect fmt, and .prettierignore doesn't affect check.
+--path also sets the directory fmt works in, and --upstream-bugs applies to both. fmt finds its
+config and ignore files as usual, so `ignore:` in .theme-check.yml doesn't affect fmt, and
+.prettierignore doesn't affect check.
 
 Exit code: the higher of the two commands': 0 clean, 1 offenses or differences, 2 bad usage or
 errors. If check exits 2, fmt doesn't run. stdout holds only check's report for tools, so
@@ -81,6 +82,7 @@ pub fn all(args: &[String]) -> i32 {
             check: !write,
             write,
             ignore_unknown: true,
+            upstream_bugs: flags.upstream_bugs(),
             timings: flags.timings(),
             embedded: true,
             ..FmtArgs::default()
