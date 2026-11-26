@@ -478,7 +478,7 @@ pub struct LiquidTagBody<'s> {
 
 /// `liquidTagBodies`.
 pub fn liquid_tag_bodies(source: &str, start_index: u32) -> Vec<LiquidTagBody<'_>> {
-    liquid_tag_bodies_in(source, &tokenize(source, TokenizeOptions::default()), start_index)
+    liquid_tag_bodies_in(source, &tokenize(source, TokenizeOptions::for_target(lq_syntax::ParseTarget::Main)), start_index)
 }
 
 /// `liquidTagBodies` over tokens that are already at hand.

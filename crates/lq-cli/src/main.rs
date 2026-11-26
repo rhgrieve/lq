@@ -1,4 +1,4 @@
-use lq_syntax::{dump, SourceMap};
+use lq_syntax::{dump, ParseTarget, SourceMap};
 use std::io::Write;
 
 mod all_cmd;
@@ -45,7 +45,7 @@ debug: lq debug-check-golden <file> [--show <n>] [--upstream-bugs]
        lq debug-engine --path <root> [--upstream-bugs]
        lq debug-offenses --path <root> [--upstream-bugs] [--only-divergence <ID>]
        lq debug-visit --files-from <list>
-       lq debug-ast [--tolerant] [--liquid-only] [--walk] [--bench] --files-from <list>
+       lq debug-ast [--tolerant] [--liquid-only] [--parser check|fmt] [--walk] [--bench] --files-from <list>
        lq debug-lax --cases <file>
        lq debug-fmt --files-from <list> | --cases <file> [options]
        lq debug-embed <list>";
@@ -128,15 +128,26 @@ fn debug_ast(args: &[String]) -> i32 {
     let liquid_only = args.iter().any(|a| a == "--liquid-only");
     let bench = args.iter().any(|a| a == "--bench");
     let walk = args.iter().any(|a| a == "--walk");
+    // `--parser check` parses as `lq check` does (theme-tools main), `fmt` (the
+    // default, which the parity scripts rely on) as `lq fmt` does (2.11.0).
+    let parser = args.iter().position(|a| a == "--parser").map(|i| args.get(i + 1));
+    let target = match parser.map(|p| p.map(String::as_str)) {
+        None | Some(Some("fmt")) => ParseTarget::Released,
+        Some(Some("check")) => ParseTarget::Main,
+        _ => {
+            eprintln!("{USAGE}");
+            return 2;
+        }
+    };
     let parse = match (tolerant, liquid_only) {
-        (false, false) => lq_syntax::parse_strict,
-        (true, false) => lq_syntax::parse_tolerant,
-        (false, true) => lq_syntax::parse_liquid_only,
-        (true, true) => lq_syntax::parse_tolerant_liquid_only,
+        (false, false) => lq_syntax::parse_strict_for,
+        (true, false) => lq_syntax::parse_tolerant_for,
+        (false, true) => lq_syntax::parse_liquid_only_for,
+        (true, true) => lq_syntax::parse_tolerant_liquid_only_for,
     };
 
     if bench {
-        return bench_parse(&files, parse);
+        return bench_parse(&files, parse, target);
     }
 
     let stdout = std::io::stdout();
@@ -144,10 +155,10 @@ fn debug_ast(args: &[String]) -> i32 {
     for path in &files {
         let line = match read_source(path) {
             Err(e) => format!("{{\"error\":{{\"name\":\"IoError\",\"message\":{:?},\"loc\":null}}}}", e.to_string()),
-            Ok(source) => match parse(&source) {
+            Ok(source) => match parse(&source, target) {
                 Ok(doc) if walk => dump::walk_line(&doc, &SourceMap::new(&source)),
                 Ok(doc) => dump::ast_line(&doc, &SourceMap::new(&source)),
-                Err(e) => dump::error_line(&e),
+                Err(e) => dump::error_line(&e, &SourceMap::new(&source)),
             },
         };
         if out.write_all(line.as_bytes()).is_err() || out.write_all(b"\n").is_err() {
@@ -160,7 +171,8 @@ fn debug_ast(args: &[String]) -> i32 {
 /// Parse-only timing over the files, read into memory first.
 fn bench_parse(
     files: &[String],
-    parse: for<'a> fn(&'a str) -> Result<lq_syntax::Document<'a>, lq_syntax::ParseError>,
+    parse: for<'a> fn(&'a str, ParseTarget) -> Result<lq_syntax::Document<'a>, lq_syntax::ParseError>,
+    target: ParseTarget,
 ) -> i32 {
     let sources: Vec<String> = files.iter().filter_map(|p| read_source(p).ok()).collect();
     let bytes: usize = sources.iter().map(String::len).sum();
@@ -170,7 +182,7 @@ fn bench_parse(
         (ok, err, nodes) = (0, 0, 0);
         let start = std::time::Instant::now();
         for source in &sources {
-            match parse(source) {
+            match parse(source, target) {
                 Ok(doc) => {
                     ok += 1;
                     nodes += u64::from(doc.node_count);
@@ -219,7 +231,7 @@ fn debug_lax(args: &[String]) -> i32 {
             _ => match lq_syntax::lax_recover_tag_markup(tag, markup, markup, 0, end) {
                 Ok(Some(m)) => format!("{{\"value\":{}}}", dump::markup_json(&m, &map)),
                 Ok(None) => undefined,
-                Err(e) => dump::error_line(&e),
+                Err(e) => dump::error_line(&e, &map),
             },
         };
         if out.write_all(line.as_bytes()).is_err() || out.write_all(b"\n").is_err() {

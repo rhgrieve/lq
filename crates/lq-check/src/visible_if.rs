@@ -73,7 +73,7 @@ pub fn variable_lookups_in_expression(expression: &str) -> ExpressionLookups {
         );
     };
     let adjusted = format!("{ADJUSTED_PREFIX}{unwrapped}{ADJUSTED_SUFFIX}");
-    let doc = match lq_syntax::parse_strict(&adjusted) {
+    let doc = match lq_syntax::parse_strict_for(&adjusted, lq_syntax::ParseTarget::Main) {
         Ok(d) => d,
         Err(e) if e.name == "LiquidHTMLParsingError" => {
             return ExpressionLookups::Warning("Syntax error: cannot parse visible_if expression.".into());

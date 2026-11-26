@@ -149,7 +149,7 @@ struct UnclosedTag {
 /// outside quotes. A missing `%}` makes the tokenizer run on to the next tag's close, so
 /// that is where the real mistake is, not the later markup the parser fails on.
 fn find_unclosed_tag(source: &str, before: u32) -> Option<UnclosedTag> {
-    let tokens = tokenize(source, TokenizeOptions::default());
+    let tokens = tokenize(source, TokenizeOptions::for_target(lq_syntax::ParseTarget::Main));
     let text = |t: &DocToken| &source[t.start as usize..t.end as usize];
     let mut found = None;
     let mut i = 0;

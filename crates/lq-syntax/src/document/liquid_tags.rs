@@ -39,7 +39,7 @@ impl<'s> DocumentParser<'s> {
         }
 
         if let Some(inner_name) = envelope.tag_name.strip_prefix("end") {
-            if tags::tag_for_name(inner_name).is_some() {
+            if self.tag_for_name(inner_name).is_some() {
                 return Err(Failure::parsing(
                     format!(
                         "Attempting to close LiquidTag '{inner_name}' before it was opened without a matching '{inner_name}'"
@@ -50,7 +50,7 @@ impl<'s> DocumentParser<'s> {
             }
         }
 
-        let Some(def) = tags::tag_for_name(envelope.tag_name) else {
+        let Some(def) = self.tag_for_name(envelope.tag_name) else {
             return Ok(make_liquid_tag_base_case(&envelope, TagBody::default(), None, false));
         };
 
@@ -78,6 +78,7 @@ impl<'s> DocumentParser<'s> {
         let tokens = tokenize_markup(envelope.markup_string, markup_string_start);
         let mut markup_parser =
             MarkupParser::new(tokens, self.source, Some(markup_string_start), Some(markup_string_end));
+        markup_parser.set_target(self.target);
         if self.tolerant {
             markup_parser.enable_tolerant();
         }

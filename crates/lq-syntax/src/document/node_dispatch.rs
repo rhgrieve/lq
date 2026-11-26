@@ -10,6 +10,11 @@ use crate::js;
 impl<'s> DocumentParser<'s> {
     // node := text | yamlFrontmatter | liquidVariableOutput | liquidTag | htmlElement | htmlComment | htmlDoctype
     pub fn parse_node_inner(&mut self) -> PResult<Node<'s>> {
+        // A comment split by a block boundary resumes after the boundary tag
+        // (31f66557). Only `main` opens comments.
+        if self.parse_html && self.open_html_comment.is_some() && !self.is_block_terminator() {
+            return self.parse_html_comment();
+        }
         let token = self.peek();
         match token.token_type {
             TokenType::Text => Ok(self.advance_as_text()),
@@ -44,8 +49,16 @@ impl<'s> DocumentParser<'s> {
                 if self.parse_html {
                     self.parse_html_comment()
                 } else {
+                    if self.main && self.open_html_comment.is_none() {
+                        self.open_html_comment = Some(Position::new(token.start, token.end));
+                    }
                     Ok(self.advance_as_text())
                 }
+            }
+            TokenType::HtmlCommentClose => {
+                // A block opened inside a comment ran past the comment's `-->`.
+                self.open_html_comment = None;
+                Ok(self.advance_as_text())
             }
             TokenType::HtmlDoctypeOpen => {
                 if self.parse_html {
@@ -56,7 +69,6 @@ impl<'s> DocumentParser<'s> {
             }
             TokenType::HtmlTagClose
             | TokenType::HtmlSelfClose
-            | TokenType::HtmlCommentClose
             | TokenType::HtmlEquals
             | TokenType::HtmlQuoteOpen
             | TokenType::HtmlQuoteClose => Ok(self.advance_as_text()),

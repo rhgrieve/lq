@@ -2,6 +2,7 @@
 
 use super::factories::*;
 use super::parser::DocumentParser;
+use super::raw_body;
 use super::tokenizer::{Token, TokenType};
 use super::tree_builder::{filter_children, ChildFilterMode};
 use crate::ast::*;
@@ -173,18 +174,40 @@ impl<'s> DocumentParser<'s> {
         let tag_name = envelope.tag_name;
         let source = self.source;
 
-        let search_start = self.tokens[self.p].start as usize;
-        let end_name = format!("end{tag_name}");
-        let end_tag = if tag_name == "comment" || tag_name == "doc" {
-            scan_for_balanced_end_tag(source, search_start, tag_name, &end_name)
+        let end_tag = if self.main {
+            // Each raw tag ends its body by its own Liquid rule (e391d5ca).
+            self.raw_body_end_for(close_token)
+                .or_else(|| {
+                    let rule = raw_body::rule_for(tag_name)?;
+                    raw_body::find_raw_body_end(
+                        source,
+                        close_token.end as usize,
+                        tag_name,
+                        rule,
+                        Some(&mut self.raw_body_end_cache),
+                    )
+                })
+                .map(|e| EndTagScanResult {
+                    tag_start: e.tag_start,
+                    tag_end: e.tag_end,
+                    ws_start: e.ws_start,
+                    ws_end: e.ws_end,
+                })
         } else {
-            scan_for_first_end_tag(source, search_start, &end_name)
+            let search_start = self.tokens[self.p].start as usize;
+            let end_name = format!("end{tag_name}");
+            if tag_name == "comment" || tag_name == "doc" {
+                scan_for_balanced_end_tag(source, search_start, tag_name, &end_name)
+            } else {
+                scan_for_first_end_tag(source, search_start, &end_name)
+            }
         };
         let Some(end_tag) = end_tag else {
-            return Err(Failure::parsing(
+            return Err(Failure::unclosed(
                 format!("Attempting to end parsing before LiquidRawTag '{tag_name}' was closed"),
                 envelope.block_start_position.start,
                 envelope.block_start_position.end,
+                self.unclosed("LiquidRawTag", tag_name, envelope.block_start_position),
             ));
         };
 
@@ -203,7 +226,13 @@ impl<'s> DocumentParser<'s> {
             body_end,
         );
 
-        self.reslice_tokens_from(end_tag.tag_end);
+        if self.main {
+            // The tokenizer bounded the body, so no token straddles its end; body
+            // parsing may have moved the cursor, but offsets stay stable.
+            self.seek_to_source_offset(end_tag.tag_end);
+        } else {
+            self.reslice_tokens_from(end_tag.tag_end);
+        }
 
         Ok(make_liquid_raw_tag(
             envelope,

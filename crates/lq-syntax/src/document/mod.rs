@@ -7,5 +7,6 @@ pub(crate) mod liquid_tags;
 pub(crate) mod liquid_variable_output;
 pub(crate) mod node_dispatch;
 pub(crate) mod parser;
+pub(crate) mod raw_body;
 pub mod tokenizer;
 pub(crate) mod tree_builder;

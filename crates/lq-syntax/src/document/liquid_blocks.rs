@@ -53,6 +53,7 @@ impl<'s> DocumentParser<'s> {
         let markup_string_start = close_token.start - envelope.markup_string.len() as u32;
         let tokens = tokenize_markup(envelope.markup_string, markup_string_start);
         let mut markup_parser = MarkupParser::new(tokens, self.source, None, None);
+        markup_parser.set_target(self.target);
         if self.tolerant {
             markup_parser.enable_tolerant();
         }
@@ -87,14 +88,20 @@ impl<'s> DocumentParser<'s> {
     }
 
     fn closing_error(&self, envelope: &LiquidTagEnvelope<'s>, inner_name: &str) -> Failure {
-        Failure::parsing(
+        Failure::unclosed(
             format!(
                 "Attempting to close LiquidTag '{inner_name}' before LiquidTag '{}' was closed",
                 envelope.tag_name
             ),
             envelope.block_start_position.start,
             envelope.block_start_position.end,
+            self.unclosed_tag(envelope),
         )
+    }
+
+    /// `unclosedTag`: the block tag an error says was never closed.
+    fn unclosed_tag(&self, envelope: &LiquidTagEnvelope<'s>) -> Option<crate::errors::UnclosedNode> {
+        self.unclosed("LiquidTag", envelope.tag_name, envelope.block_start_position)
     }
 
     /// Reports an iteration that consumed nothing. `Ok(true)` means keep looping,
@@ -155,17 +162,18 @@ impl<'s> DocumentParser<'s> {
                             );
                             return Ok((merged, end));
                         }
-                        if tags::tag_for_name(inner_name).is_some() {
+                        if self.tag_for_name(inner_name).is_some() {
                             return Err(self.closing_error(envelope, inner_name));
                         }
                     }
                     if is_branch_name(name) {
-                        return Err(Failure::parsing(
+                        return Err(Failure::unclosed(
                             format!(
                                 "Attempting to open LiquidBranch '{name}' before LiquidTag '{parent_name}' was closed"
                             ),
                             envelope.block_start_position.start,
                             envelope.block_start_position.end,
+                            self.unclosed_tag(envelope),
                         ));
                     }
                 }
@@ -191,10 +199,11 @@ impl<'s> DocumentParser<'s> {
                 },
             ));
         }
-        Err(Failure::parsing(
+        Err(Failure::unclosed(
             format!("Attempting to end parsing before LiquidTag '{parent_name}' was closed"),
             envelope.block_start_position.start,
             envelope.block_start_position.end,
+            self.unclosed_tag(envelope),
         ))
     }
 
@@ -256,7 +265,7 @@ impl<'s> DocumentParser<'s> {
                 }
 
                 if let Some(inner_name) = inner_name {
-                    if tags::tag_for_name(inner_name).is_some() {
+                    if self.tag_for_name(inner_name).is_some() {
                         return Err(self.closing_error(envelope, inner_name));
                     }
                 }
@@ -283,10 +292,11 @@ impl<'s> DocumentParser<'s> {
                 },
             ));
         }
-        Err(Failure::parsing(
+        Err(Failure::unclosed(
             format!("Attempting to end parsing before LiquidTag '{parent_name}' was closed"),
             envelope.block_start_position.start,
             envelope.block_start_position.end,
+            self.unclosed_tag(envelope),
         ))
     }
 
@@ -305,6 +315,7 @@ impl<'s> DocumentParser<'s> {
             markup_string_start,
             self.source,
             self.tolerant,
+            self.target,
         )
     }
 
@@ -354,12 +365,14 @@ pub(crate) fn parse_branch_markup_at<'s>(
     markup_string_start: u32,
     source: &'s str,
     tolerant: bool,
+    target: crate::ParseTarget,
 ) -> Markup<'s> {
     if branch_name == "else" {
         return Markup::Str("");
     }
     let tokens = tokenize_markup(envelope.markup_string, markup_string_start);
     let mut markup_parser = MarkupParser::new(tokens, source, None, None);
+    markup_parser.set_target(target);
     if tolerant {
         markup_parser.enable_tolerant();
     }

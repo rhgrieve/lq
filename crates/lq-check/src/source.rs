@@ -55,7 +55,7 @@ impl<'a> SourceCode<'a> {
 /// `toSourceCode(uri, source)`.
 pub fn to_source_code<'a>(u: &str, source: &'a str) -> SourceCode<'a> {
     let ast = if u.ends_with(".liquid") {
-        Ast::Liquid(lq_syntax::parse_strict(source))
+        Ast::Liquid(lq_syntax::parse_strict_for(source, lq_syntax::ParseTarget::Main))
     } else {
         Ast::Json(to_json_node(source))
     };
