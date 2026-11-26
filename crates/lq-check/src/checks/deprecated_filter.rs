@@ -303,7 +303,7 @@ impl<'a> LiquidCheck<'a> for DeprecatedFilter {
         };
 
         let p = node.position();
-        let mut problem = LiquidProblem::new(message, p.start + 1, p.end);
+        let mut problem = LiquidProblem::new(message, crate::check_utils::next_char(cx.source(), p.start), p.end);
         let (start, end) = filter_span(node, cx.source());
         let own_only = cx.divergence(Divergence::ImgUrlPrototype);
         let suggestion = match filter.name {

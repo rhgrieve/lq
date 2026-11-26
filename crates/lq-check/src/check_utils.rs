@@ -217,3 +217,13 @@ mod closest_tests {
         assert_eq!(closest("cart", ["carp", "cars"]), Some("carp"));
     }
 }
+
+/// `index + 1` in UTF-16 units, as a byte offset: past the whole character at `index`.
+pub fn next_char(source: &str, index: u32) -> u32 {
+    index + source.get(index as usize..).and_then(|s| s.chars().next()).map_or(1, |c| c.len_utf8() as u32)
+}
+
+/// `index - 1` in UTF-16 units, as a byte offset: the start of the character before `index`.
+pub fn prev_char(source: &str, index: u32) -> u32 {
+    index - source.get(..index as usize).and_then(|s| s.chars().next_back()).map_or(1, |c| c.len_utf8() as u32)
+}

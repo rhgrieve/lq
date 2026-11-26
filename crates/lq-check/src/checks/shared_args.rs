@@ -43,8 +43,9 @@ pub fn has_children(tag: &LiquidTag<'_>) -> bool {
 
 fn block_tag_has_syntax_error(tag: &LiquidTag<'_>, markup: &BlockMarkup<'_>, source: &str) -> bool {
     let args = || markup.args.iter().filter_map(named);
+    // App block settings must be fixed values (theme-tools 5740888d).
     if block_name(markup).starts_with("shopify://apps/")
-        && (args().any(|a| a.name != "block.name") || has_content(tag))
+        && (args().any(|a| a.name != "block.name" && !is_fixed_app_setting(&a.value)) || has_content(tag))
     {
         return true;
     }
@@ -55,6 +56,19 @@ fn block_tag_has_syntax_error(tag: &LiquidTag<'_>, markup: &BlockMarkup<'_>, sou
     }) || {
         let p = tag.markup_position;
         has_skipped_characters(lq_syntax::js::slice(source, p.start, p.end))
+    }
+}
+
+/// `isFixedAppSetting(value)`: a string, a number, `true` or `false`, or a flat array of those.
+pub fn is_fixed_app_setting(value: &Node<'_>) -> bool {
+    let fixed = |n: &Node<'_>| match n {
+        Node::String(_) | Node::Number(_) => true,
+        Node::LiquidLiteral(l) => matches!(l.keyword, "true" | "false"),
+        _ => false,
+    };
+    match value {
+        Node::BlockArrayLiteral(a) => a.elements.iter().all(fixed),
+        other => fixed(other),
     }
 }
 

@@ -32,7 +32,7 @@ impl<'a> LiquidCheck<'a> for Check {
                         end,
                     )
                     .hints_if(cx.wants_hints(), |p| p.label("unknown argument"))
-                    .suggest(format!("Remove '{}'", alias.value), |c| c.remove(start - 1, end)),
+                    .suggest(format!("Remove '{}'", alias.value), |c| c.remove(crate::check_utils::prev_char(cx.source(), start), end)),
                 );
             }
         }

@@ -274,4 +274,3 @@ This snippet is not referenced by any other files
 [32m→[0m 5 offenses have a suggested change, shown as "try"
 23 offenses in 6 of 8 files checked in <time>
 [1;31mfailed:[0m 10 offenses at fail level error; the other 13 don't fail this run
-[lq] note: 2 enabled checks are not implemented yet and did not run

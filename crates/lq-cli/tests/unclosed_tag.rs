@@ -77,7 +77,8 @@ fn upstream_bugs_has_upstreams_report() {
 fn a_stray_opener_that_is_not_an_unclosed_tag_gets_no_note() {
     for (name, source) in [
         ("string", "{{ \"{%\" }}\n</div>\n"),
-        ("comment", "{% comment %} {{ {% endcomment %}\n</div>\n"),
+        // `{% comment %} {{ {% endcomment %}` was one too, until theme-tools main started
+        // reporting it as an unclosed comment, as Liquid does.
         ("raw", "{% raw %} {% {% endraw %}\n</div>\n"),
         ("none", "ok\n</div>\n"),
     ] {

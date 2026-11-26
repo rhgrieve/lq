@@ -288,7 +288,7 @@ fn check_block(tag: &LiquidTag<'_>, raw: &str, cx: &LiquidCx<'_, '_>) {
     // `block.name` is metadata, not a setting (theme-tools 5740888d).
     if let Node::String(name) = &markup.name {
         if name.value.starts_with("shopify://apps/") {
-            if let Some(dynamic) = named().find(|a| a.name != "block.name" && !is_fixed_app_setting(&a.value)) {
+            if let Some(dynamic) = named().find(|a| a.name != "block.name" && !super::shared_args::is_fixed_app_setting(&a.value)) {
                 let message = format!(
                     "Liquid syntax error: in 'block' - app block settings must be fixed values; '{}' is not a string, number, boolean or array of those",
                     dynamic.name
@@ -308,19 +308,6 @@ fn check_block(tag: &LiquidTag<'_>, raw: &str, cx: &LiquidCx<'_, '_>) {
     }
     if has_skipped_characters(raw) {
         report(cx, p, SYNTAX_ERROR);
-    }
-}
-
-/// `isFixedAppSetting(value)`: a string, a number, `true` or `false`, or a flat array of those.
-fn is_fixed_app_setting(value: &Node<'_>) -> bool {
-    let fixed = |n: &Node<'_>| match n {
-        Node::String(_) | Node::Number(_) => true,
-        Node::LiquidLiteral(l) => matches!(l.keyword, "true" | "false"),
-        _ => false,
-    };
-    match value {
-        Node::BlockArrayLiteral(a) => a.elements.iter().all(fixed),
-        other => fixed(other),
     }
 }
 

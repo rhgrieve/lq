@@ -134,9 +134,11 @@ pub fn for_each_visit_child<'a, F: FnMut(&'a Node<'a>)>(node: &'a Node<'a>, mut 
         Node::LiquidDocExampleNode(n) => f(&n.content),
         Node::LiquidDocPromptNode(n) => f(&n.content),
         Node::BlockArrayLiteral(n) => list!(n.elements),
+        // Main parses the Liquid inside a comment, which Liquid renders (theme-tools 31f66557);
+        // on 2.11.0 there are no children.
+        Node::HtmlComment(n) => list!(n.children),
         Node::YamlFrontmatter(_)
         | Node::HtmlDoctype(_)
-        | Node::HtmlComment(_)
         | Node::TextNode(_)
         | Node::LiquidLiteral(_)
         | Node::String(_)

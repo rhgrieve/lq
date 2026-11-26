@@ -133,6 +133,9 @@ fn next_node<'a>(parent: Option<&'a Node<'a>>, node: &'a Node<'a>) -> Option<&'a
         Node::Document(n) => &n.children,
         Node::LiquidBranch(n) => &n.children,
         Node::HtmlElement(n) => &n.children,
+        Node::HtmlComment(n) => &n.children,
+        // The `nodes` of a raw body, as in `<style>`, `<script>` and `<svg>` (theme-tools 7d13d63f).
+        Node::RawMarkup(n) => &n.nodes,
         _ => &[],
     };
     let i = siblings.iter().position(|c| same(c, node))?;
