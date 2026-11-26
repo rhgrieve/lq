@@ -1,11 +1,12 @@
-//! The lint engine of `lq`, a port of `@shopify/theme-check-common` 3.31.0 plus
-//! `theme-graph`, minus the individual checks' upstream code. See `PORTING.md`.
+//! The lint engine of `lq`, a port of `@shopify/theme-check-common` and `theme-graph` at
+//! Shopify/theme-tools `main` (af2e1a7), minus the individual checks' upstream code. See `PORTING.md`.
 //!
 //! - [`api`]: what a check is written against.
 //! - [`registry`]: all checks; [`checks`]: one file per check.
 //! - [`run`]: `check()`: one AST walk per Liquid file, files in parallel.
 //! - [`deps`]: the dependencies a run uses, [`deps::NodeDependencies`] for real themes.
-//! - [`golden`]: replay of the golden corpus recorded from upstream's specs.
+//! - [`golden`]: replay of recorded check runs (`lq debug-check-golden`), and the mock
+//!   dependencies of upstream's test helper, which [`upstream_specs`] runs upstream's specs on.
 
 pub mod api;
 pub mod block_parameters;

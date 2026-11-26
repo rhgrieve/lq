@@ -1,6 +1,6 @@
 # Divergences from upstream
 
-`lq` targets `shopify theme check` (theme-check 3.31.0). Where upstream has a demonstrated bug, `lq` fixes it by
+`lq` targets `shopify theme check` as of Shopify/theme-tools `main` at `af2e1a7`, past theme-check 4.0.2. Where upstream has a demonstrated bug, `lq` fixes it by
 default. `lq check --upstream-bugs` turns every fix off and reproduces upstream, which is the mode all parity gates
 run in.
 

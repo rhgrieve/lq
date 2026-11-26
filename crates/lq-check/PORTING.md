@@ -1,7 +1,7 @@
 # Porting a check
 
-Upstream source is at `reference/theme-tools/packages/theme-check-common/src/checks/<dir>/index.ts`
-(tag `@shopify/theme-check-node@3.31.0`; `reference/` is gitignored scratch). Every check already has a file,
+Upstream source is at `reference/theme-tools-main/packages/theme-check-common/src/checks/<dir>/index.ts`
+(Shopify/theme-tools `main` at `af2e1a78`, the commit `lq check` targets; `reference/` is gitignored scratch). Every check already has a file,
 `crates/lq-check/src/checks/<snake_case_export_name>.rs`, holding
 `pub const IMPL: CheckImpl = CheckImpl::NotImplemented;`. Replace it with the port. Edit only that file, plus
 `checks/shared.rs` for helpers several checks need, so agents working in parallel don't collide. Metadata (code,
@@ -99,9 +99,9 @@ freely. Don't compute anything expensive before you know you need it.
 - **Fixes run at report time** and only record data. Fixers can't read mutable state later than that. A JSON fix
   re-serializes the whole file on apply, as upstream.
 - **Promise.all ordering.** Where upstream fans out with `Promise.all`, report in the order its mock-fs timing
-  produces. Replays compare order within a file, so a golden failure says so if it differs.
-- `getFileSize`/`hasRemoteAssetSizeExceededThreshold`: **no network, ever.** It returns false, which is upstream's
-  behaviour when the request fails.
+  produces. The specs compare offenses as a set; `lint.mjs` reports a different order within a file.
+- `remoteFileSize`: **no network, ever.** `lq`'s own runs answer 0, which is upstream's behaviour when the request
+  fails. The specs' mocks give real sizes.
 - Two definitions share the code `MaxFileSize` (Liquid and JSON files), with separate files `max_file_size.rs` and
   `max_file_size_json.rs`. `UniqueSettingIds` has code `UniqueSettingId`.
 
@@ -113,20 +113,18 @@ A port reproduces upstream, bugs included. Where upstream has a demonstrated bug
 with `--upstream-bugs`, which turns them all off. Don't fix a bug any other way: a gate must always be able to compare
 with upstream.
 
-## Goldens
+## Specs
 
-`tests/goldens/<CheckCode>.jsonl` holds one record per `check()` call in upstream's specs: theme, settings, mocks and
-expected offenses, fixes and suggestions. They replay with the helper's default mock docset and MockFileSystem.
+`specs/upstream/checks/<check>.yml` holds upstream's language-neutral specs for each check: the theme, docset,
+references, settings and mode of each case, with its expected offenses, fixes and suggestions. They run on the mock
+dependencies of upstream's test helper, in `--upstream-bugs` mode, and every case must pass.
 
 ```sh
-cargo build --profile fast -p lq-cli
-target/fast/lq debug-check-golden tests/goldens/UnusedAssign.jsonl --show 5 --upstream-bugs   # diffs of one check
-LQ_PROFILE=fast node scripts/parity/goldens.mjs UnusedAssign                  # passed/total/unreplayable
-cargo test -p lq-check --test goldens                                         # everything
+cargo test -p lq-check --test upstream_specs -- --nocapture                       # every case, failures listed
+LQ_SPECS_DEFAULT_MODE=1 cargo test -p lq-check --test upstream_specs -- --nocapture   # with lq's fixes on
 ```
 
-A check with `ValidStaticBlockType`-style multi-check records also has entries in `_multi.jsonl`; those replay once
-all their checks exist. Goldens can't cover what specs don't test through `check()`, so also run the real thing:
+Specs can't cover what upstream doesn't test, so also run the real thing:
 
 ```sh
 LQ_PROFILE=fast node scripts/parity/lint.mjs --show 20     # lq vs upstream on the three themes
@@ -134,9 +132,8 @@ LQ_PROFILE=fast node scripts/parity/lint.mjs --show 20     # lq vs upstream on t
 
 ## Done means
 
-1. `lq debug-check-golden tests/goldens/<Code>.jsonl` shows `failed: 0` with `passed` equal to `total` minus any
-   recorded unreplayable. Don't special-case a test to pass; if something can't match, leave the failure visible and
-   explain it.
+1. `upstream_specs` passes every case of the check's spec. Don't special-case a test to pass; if something can't
+   match, leave the failure visible and explain it.
 2. `lint.mjs` shows no missing or extra offense for your check in any of the three themes. Its failures are listed
    per check; a difference in an implemented check makes it exit 1.
 3. `cargo clippy -p lq-check --all-targets` is clean and no new dependency was added without asking.

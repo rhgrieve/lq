@@ -1325,7 +1325,9 @@ impl<'a> Eval<'a, '_> {
                 (normalize_floats(multiple_of), normalize_floats(val))
             {
                 let (mut m_value, mut v_value) = (m.0, v.0);
-                let multiplier = 10f64.powf(f64::from((v.1 - m.1).abs()));
+                // `10 ** n`, which V8 rounds correctly: `powf` gives 1.0000000000000001e23 for
+                // 10^23, where JS gives 1e23. Parsing `1e{n}` rounds correctly too.
+                let multiplier: f64 = format!("1e{}", (v.1 - m.1).abs()).parse().unwrap_or(f64::INFINITY);
                 if v.1 < m.1 {
                     v_value *= multiplier;
                 } else {

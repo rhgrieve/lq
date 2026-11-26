@@ -12,8 +12,9 @@ permissions:
   contents: read
 
 env:
-  # theme-tools tag whose license text ships in the tarball. See README, re-pinning.
-  UPSTREAM_TAG: '@shopify/theme-check-node@3.31.0'
+  # theme-tools commit whose license text ships in the tarball: the one `lq check` targets. See
+  # README, re-pinning.
+  UPSTREAM_TAG: 'af2e1a784a1f9a454beececb9a987a8271c02d57'
   PRETTIER_VERSION: '3.9.10'
 
 jobs:

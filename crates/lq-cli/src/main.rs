@@ -15,8 +15,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 const STACK_SIZE: usize = 1 << 30;
 
 const HELP: &str = "\
-lq: a fast native clone of `shopify theme check` (theme-check 3.31.0) and the Prettier Liquid
-plugin (1.11.3). Not affiliated with or endorsed by Shopify.
+lq: a fast native clone of `shopify theme check` (theme-check 4.0.2 plus theme-tools main at
+af2e1a7) and the Prettier Liquid plugin (1.11.3). Not affiliated with or endorsed by Shopify.
 
 Usage: lq <command> [options]
 
@@ -71,7 +71,7 @@ fn run(args: &[String]) -> i32 {
             0
         }
         Some("--version" | "-V") => {
-            println!("lq {} (theme-check 3.31.0, prettier-plugin-liquid 1.11.3)", env!("CARGO_PKG_VERSION"));
+            println!("lq {} (theme-check 4.0.2+af2e1a7, prettier-plugin-liquid 1.11.3)", env!("CARGO_PKG_VERSION"));
             0
         }
         Some("debug-ast") => debug_ast(&args[1..]),

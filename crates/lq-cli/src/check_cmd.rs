@@ -20,8 +20,9 @@ use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::time::Instant;
 
-/// Upstream's parity target: what `--version` reports.
-const THEME_CHECK_VERSION: &str = "3.31.0";
+/// Upstream's parity target: what `--version` reports. theme-tools `main` at af2e1a7 is past the
+/// theme-check-node 4.0.2 release, with its version still unchanged, hence the build metadata.
+const THEME_CHECK_VERSION: &str = "4.0.2+af2e1a7";
 
 /// Worker threads parse and walk deep trees too.
 const WORKER_STACK: usize = 1 << 30;
@@ -92,7 +93,7 @@ impl Flags {
 }
 
 pub const CHECK_HELP: &str = "\
-Check a theme, like `shopify theme check` (theme-check 3.31.0). Never touches the network.
+Check a theme, like `shopify theme check` (theme-check 4.0.2+af2e1a7). Never touches the network.
 
 Usage: lq check [options] [files or directories...]
 
