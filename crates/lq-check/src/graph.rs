@@ -95,6 +95,28 @@ struct Builder<'a, 'b> {
 
 const IMAGE_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "gif", "webp", "heic", "ico"];
 
+/// The name Shopify serves an asset under: `theme.css.liquid` is `theme.css` (`isLiquidAsset`).
+fn served_name(asset: &str) -> &str {
+    match asset.strip_suffix(".liquid") {
+        Some(name) if [".css", ".js", ".scss"].iter().any(|e| name.ends_with(e)) => name,
+        _ => asset,
+    }
+}
+
+/// `assetSources(asset)`: the files Shopify looks for, in order, when it serves `asset`.
+/// `theme.css` comes from `theme.css.liquid`, then `theme.css`; `theme.scss.css` also from
+/// `theme.scss.liquid`, then `theme.scss`. Other assets come from their own file.
+fn asset_sources(asset: &str) -> Vec<String> {
+    if !matches!(extname(asset), "css" | "js") {
+        return vec![asset.to_string()];
+    }
+    let mut sources = vec![format!("{asset}.liquid"), asset.to_string()];
+    if let Some(scss) = asset.strip_suffix(".css").filter(|s| s.ends_with(".scss")) {
+        sources.extend([format!("{scss}.liquid"), scss.to_string()]);
+    }
+    sources
+}
+
 fn extname(u: &str) -> &str {
     u.rsplit('.').next().unwrap_or("")
 }
@@ -187,13 +209,33 @@ impl<'a> Builder<'a, '_> {
         self.module(ModuleKind::Layout, u)
     }
 
+    /// `getAssetModule(themeGraph, asset)`. Shopify renders `theme.css.liquid` and serves it as
+    /// `theme.css`, so a Liquid asset has the type of the name it's served under; SCSS is CSS.
     fn asset_module(&mut self, asset: &str) -> Option<String> {
-        let ext = extname(asset);
-        if !(IMAGE_EXTENSIONS.contains(&ext) || matches!(ext, "js" | "css" | "svg")) {
+        let ext = extname(served_name(asset));
+        if !(IMAGE_EXTENSIONS.contains(&ext) || matches!(ext, "js" | "css" | "scss" | "svg")) {
             return None;
         }
         let u = uri::join(self.root_uri, &["assets", asset]);
         Some(self.module(ModuleKind::Asset, u))
+    }
+
+    /// `servingAsset(target)`: the first of `assetSources` that exists, for a CSS or JavaScript
+    /// asset. A reference to a file that doesn't exist keeps its target.
+    fn serving_asset(&mut self, target: &str) -> String {
+        let is_code = self.cache.get(target).is_some_and(|m| m.kind == ModuleKind::Asset)
+            && matches!(extname(served_name(target)), "css" | "scss" | "js");
+        if !is_code {
+            return target.to_string();
+        }
+        for source in asset_sources(&uri::basename(target, None)) {
+            if let Some(m) = self.asset_module(&source) {
+                if self.deps.fs().stat(&m).is_ok() {
+                    return m;
+                }
+            }
+        }
+        target.to_string()
     }
 
     /// `getModule(themeGraph, uri)`.
@@ -275,6 +317,20 @@ impl<'a> Builder<'a, '_> {
             Ok(Some(this.liquid_references(&doc.root)))
         })?;
         let Some(targets) = targets else { return Ok(()) };
+        // Each distinct target is resolved once: a CSS or JavaScript reference reaches the file
+        // Shopify serves it from (theme-tools db3d76c6).
+        let mut served: Vec<(String, String)> = Vec::new();
+        let targets: Vec<(String, (u32, u32))> = targets
+            .into_iter()
+            .map(|(target, range)| {
+                if let Some((_, s)) = served.iter().find(|(t, _)| *t == target) {
+                    return (s.clone(), range);
+                }
+                let s = self.serving_asset(&target);
+                served.push((target, s.clone()));
+                (s, range)
+            })
+            .collect();
         let mut unique = Vec::new();
         for (target, range) in targets {
             self.bind(u, &target, Some(range), ReferenceType::Direct);

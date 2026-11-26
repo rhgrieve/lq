@@ -24,7 +24,7 @@ const ONLY = opt('--only', null);
 const OUT = path.join(GEN, 'liquid-syntax');
 const SPEC_DIR = path.join(
   ROOT,
-  'reference/theme-tools/packages/theme-check-common/src/checks/liquid-syntax-error',
+  'reference/theme-tools-main/packages/theme-check-common/src/checks/liquid-syntax-error',
 );
 
 const definition = allChecks.find((c) => c.meta.code === 'LiquidSyntaxError');

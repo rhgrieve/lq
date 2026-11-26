@@ -137,7 +137,6 @@ impl std::error::Error for ConfigError {}
 pub struct Config {
     pub context: Mode,
     /// Check code to settings (camelCased keys, numeric severity), in JS key order.
-    /// May contain the literal `undefined` key; see `unaliased_settings`.
     pub settings: Object,
     /// Enabled check codes, in registry order.
     pub checks: Vec<&'static str>,
@@ -857,13 +856,15 @@ fn is_enabled_by(settings: &Object, check: &CheckInfo) -> bool {
     check_settings.and_then(|s| s.get("enabled")).is_some_and(Value::is_truthy)
 }
 
-/// `Object.fromEntries(entries.map(([code, v]) => [unaliasedCode(code), v]))`: a code
-/// not among the enabled checks turns into the key `undefined`.
-fn unaliased_settings(settings: &Object, checks: &[&'static CheckInfo]) -> Object {
+/// `unaliasedSettings(settings, availableChecks)`: each code or alias under its check's code,
+/// looked up among every available check, enabled or not. A code that names no check is
+/// dropped (theme-tools 803a88a5).
+fn unaliased_settings(settings: &Object, checks: &'static [CheckInfo]) -> Object {
     let mut out = Object::new();
     for (code, value) in settings.iter() {
-        let check = checks.iter().find(|c| c.code == code || c.aliases.contains(&code));
-        out.insert(check.map_or("undefined", |c| c.code), value.clone());
+        if let Some(check) = checks.iter().find(|c| c.code == code || c.aliases.contains(&code)) {
+            out.insert(check.code, value.clone());
+        }
     }
     out
 }
@@ -885,6 +886,11 @@ fn load_config_description(
     let node_module_root = find_node_module_root(root);
     let mut third_party = description.require.clone();
     third_party.extend(find_third_party_checks(&node_module_root));
+    // Upstream runs custom check JavaScript only when its caller authorizes it, which
+    // `shopify theme check` doesn't, and says so once (theme-tools 803a88a5). `lq` never runs it.
+    if !third_party.is_empty() {
+        eprintln!("Custom Theme Checks are disabled. Explicit authorization is required to execute custom check JavaScript.");
+    }
     for module in &third_party {
         eprintln!("[lq] note: third-party checks are not supported, ignoring {module}");
     }
@@ -915,7 +921,7 @@ fn config_from_description(
     let enabled: Vec<&'static CheckInfo> =
         registry.iter().filter(|c| is_enabled_by(&description.check_settings, c)).collect();
     let root_uri = uri::file_uri(root);
-    let settings = unaliased_settings(&description.check_settings, &enabled);
+    let settings = unaliased_settings(&description.check_settings, registry);
     let root_uri = resolve_root(&root_uri, description.root.as_ref())?;
     let ignore: Vec<String> = description.ignore.iter().filter_map(Value::as_str).map(str::to_string).collect();
 

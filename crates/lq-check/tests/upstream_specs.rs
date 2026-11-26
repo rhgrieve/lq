@@ -1,9 +1,11 @@
-//! Upstream's check specs (`specs/checks` in Shopify/theme-tools), run against lq.
+//! Upstream's check specs (`specs/upstream/checks`), run against lq in `--upstream-bugs` mode,
+//! where every case must pass: `lq check` targets the commit they were copied from.
 //!
-//!     LQ_UPSTREAM_SPECS=<theme-tools>/specs cargo test -p lq-check --test upstream_specs -- --ignored --nocapture
+//!     cargo test -p lq-check --test upstream_specs -- --nocapture
 //!
-//! `LQ_SPECS_UPSTREAM_BUGS=1` runs with every divergence off. It reports and never fails:
-//! the specs follow upstream's `main`, and lq targets a release.
+//! `LQ_UPSTREAM_SPECS=<theme-tools>/specs` runs another copy. `LQ_SPECS_DEFAULT_MODE=1` runs with
+//! lq's fixes on instead, and only reports, since the divergences differ from upstream by design.
+//! `LQ_SPECS_OUT=<file>` writes each case's outcome as JSON.
 
 use lq_check::upstream_specs::{run_case, CaseOutcome};
 use lq_json::Value;
@@ -12,16 +14,18 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 #[test]
-#[ignore = "needs LQ_UPSTREAM_SPECS"]
 fn upstream_check_specs() {
     // Deeply nested cases need more than a test thread's stack, as the CLI's threads have.
     std::thread::Builder::new().stack_size(256 << 20).spawn(run).unwrap().join().unwrap();
 }
 
 fn run() {
-    let Ok(root) = std::env::var("LQ_UPSTREAM_SPECS") else { return };
-    let dir = Path::new(&root).join("checks");
-    let divergences = if std::env::var_os("LQ_SPECS_UPSTREAM_BUGS").is_some() { Divergences::NONE } else { Divergences::ALL };
+    let dir = match std::env::var_os("LQ_UPSTREAM_SPECS") {
+        Some(root) => Path::new(&root).join("checks"),
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../specs/upstream/checks"),
+    };
+    let default_mode = std::env::var_os("LQ_SPECS_DEFAULT_MODE").is_some();
+    let divergences = if default_mode { Divergences::ALL } else { Divergences::NONE };
     let docsets = |name: &str| {
         let text = std::fs::read_to_string(dir.join("docsets").join(format!("{name}.yml"))).ok()?;
         lq_theme::yaml::parse(&text).ok()
@@ -78,4 +82,8 @@ fn run() {
     }
     println!("\nunsupported: {unsupported:?}");
     println!("passed {passed}, failed {failed}, unsupported {}", unsupported.values().sum::<usize>());
+    assert!(passed > 0, "no check specs in {}", dir.display());
+    if !default_mode {
+        assert!(failed == 0 && unsupported.is_empty(), "{failed} failed and {} unsupported: run with --nocapture", unsupported.values().sum::<usize>());
+    }
 }

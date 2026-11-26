@@ -1,5 +1,3 @@
-# From Shopify/theme-tools specs/graph/contextual.yml at 0507e17e (PR 1283), unchanged below.
-# Edge ranges are [line, column] of the start, both from 0.
 # Contextual templates and section groups (`*.context.<name>.json`) override the file their
 # `parent` names. Shopify deep-merges the override into it, so an override's section or block
 # that is already in the parent has no `type`: it inherits it. An override can also add
