@@ -554,18 +554,30 @@ fn detect_invalid_loop_arguments<'a>(tag: &LiquidTag<'a>, node_start: u32, cx: &
         return;
     }
 
-    // The first three are `<variable> in <array>`: they may not have typed the rest yet.
-    // Without quotes, parentheses or colons the fragments are just the plain tokens,
-    // which covers most loops without running the regex.
+    // Past `<variable> in <array>`, they may not have typed the rest yet. Without quotes,
+    // parentheses or colons the fragments are just the plain tokens, which covers most loops
+    // without running the regex.
     if !markup.contains(['"', '\'', '(', ':'])
         && markup.split(|c| lq_syntax::js::is_ws_char(c) || c == ',').filter(|t| !t.is_empty()).nth(3).is_none()
     {
         return;
     }
-    let fragments = fragments_in_markup(markup);
-    if fragments.len() <= 3 {
-        return;
-    }
+    // `(markupIndex, fragments)`: the arguments after `<variable> in <array>`, at offsets from
+    // the markup's start.
+    let (markup_index, fragments) = match &tag.markup {
+        Markup::Node(n) => {
+            let Node::ForMarkup(m) = &**n else { return };
+            (n.position().start, parsed_argument_fragments(source, n.position(), m))
+        }
+        _ => {
+            let Some(index) = index_of(source, markup, node_start) else { return };
+            let fragments = fragments_in_markup(markup).into_iter().skip(3).map(|f| ArgumentFragment { value: f.value, index: f.index, key: None });
+            (index, fragments.collect())
+        }
+    };
+    let (Some(first), Some(last)) = (fragments.first(), fragments.last()) else { return };
+    let start = markup_index + first.index as u32;
+    let end = markup_index + (last.index + last.value.len()) as u32;
 
     // Positional arguments are ignored after invalid positional or named ones.
     let mut no_more_positional = false;
@@ -576,13 +588,14 @@ fn detect_invalid_loop_arguments<'a>(tag: &LiquidTag<'a>, node_start: u32, cx: &
         tag_entry.is_some_and(|t| t.parameters.iter().any(|p| p.name == key && p.positional == positional))
     };
 
-    for fragment in &fragments[3..] {
-        if has_unsupported_parentheses(fragment.value) {
+    for fragment in &fragments {
+        // The parser already accepted the value of a named argument it found.
+        if fragment.key.is_none() && has_unsupported_parentheses(fragment.value) {
             no_more_positional = true;
             invalid.push(fragment.value);
             continue;
         }
-        if let Some(key) = fragment_key(fragment.value) {
+        if let Some(key) = fragment.key.or_else(|| fragment_key(fragment.value)) {
             no_more_positional = true;
             if !is_supported(key, false) {
                 invalid.push(fragment.value);
@@ -599,16 +612,64 @@ fn detect_invalid_loop_arguments<'a>(tag: &LiquidTag<'a>, node_start: u32, cx: &
         return;
     }
 
-    let Some(markup_index) = index_of(source, markup, node_start) else { return };
-    let last = &fragments[fragments.len() - 1];
-    let start = markup_index + fragments[3].index as u32;
-    let end = markup_index + (last.index + last.value.len()) as u32;
     let message = format!(
         "Arguments must be provided in the format `{} in <array> <positional arguments> <named arguments>`. Invalid/Unknown arguments: {}",
         tag.name,
         invalid.join(", "),
     );
     cx.report(LiquidProblem::new(message, start, end).fix(|c| c.replace(start, end, filtered.join(" "))));
+}
+
+/// `ArgumentFragment`: a loop argument at an offset from the markup's start. `key` is set for a
+/// named argument the parser found.
+struct ArgumentFragment<'s> {
+    value: &'s str,
+    index: usize,
+    key: Option<&'s str>,
+}
+
+/// `parsedArgumentFragments(markup)`: the fragments of a parsed loop's markup after
+/// `<variable> in <array>` (theme-tools 4aaa426d). The parser already found the collection and
+/// the named arguments, whose values can be lookups like `settings['item count']` that the
+/// fragment pattern would split at the space. So only the text around them goes through the
+/// pattern, and so does an argument whose text isn't exactly `<name>: <value>`, because the
+/// parser skips characters such as the `!` of `limit!: 2`.
+fn parsed_argument_fragments<'s>(source: &'s str, position: lq_syntax::Position, markup: &'s lq_syntax::ast::ForMarkup<'s>) -> Vec<ArgumentFragment<'s>> {
+    let offset = position.start as usize;
+    let mut fragments = Vec::new();
+    let mut text_start = markup.collection.position().end as usize;
+    let add_text_until = |fragments: &mut Vec<ArgumentFragment<'s>>, text_start: usize, text_end: usize| {
+        let text = &source[text_start..text_end.max(text_start)];
+        for f in fragments_in_markup(text) {
+            fragments.push(ArgumentFragment { value: f.value, index: text_start - offset + f.index, key: None });
+        }
+    };
+    for arg in &markup.args {
+        let Node::NamedArgument(named) = arg else { continue };
+        let p = arg.position();
+        if !is_exact_named_argument(source, p, named) {
+            continue;
+        }
+        add_text_until(&mut fragments, text_start, p.start as usize);
+        fragments.push(ArgumentFragment {
+            value: &source[p.start as usize..p.end as usize],
+            index: p.start as usize - offset,
+            key: Some(&named.name),
+        });
+        text_start = p.end as usize;
+    }
+    add_text_until(&mut fragments, text_start, position.end as usize);
+    fragments
+}
+
+/// `isExactNamedArgument(source, arg)`: its text is `<name>` then `\s*:\s*`, then its value.
+fn is_exact_named_argument(source: &str, p: lq_syntax::Position, arg: &lq_syntax::ast::NamedArgument<'_>) -> bool {
+    let value = arg.value.position();
+    let name_and_colon = &source[p.start as usize..value.start as usize];
+    name_and_colon
+        .strip_prefix(&*arg.name)
+        .is_some_and(|rest| rest.trim_matches(lq_syntax::js::is_ws_char) == ":")
+        && value.end == p.end
 }
 
 // `checks/InvalidConditionalNodeParenthesis.ts`.

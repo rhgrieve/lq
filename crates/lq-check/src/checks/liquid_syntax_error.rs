@@ -280,18 +280,25 @@ fn check_block(tag: &LiquidTag<'_>, raw: &str, cx: &LiquidCx<'_, '_>) {
             _ => None,
         })
     };
+    if let Some(dotted) = named().find(|a| a.name != "block.name" && a.name.contains('.')) {
+        return report(cx, dotted.position, &dotted_argument_message(&dotted.name));
+    }
+    // App settings map to JSON settings: only fixed scalars or flat arrays of them, and every
+    // occurrence is checked so a later fixed duplicate doesn't hide an earlier expression.
+    // `block.name` is metadata, not a setting (theme-tools 5740888d).
     if let Node::String(name) = &markup.name {
         if name.value.starts_with("shopify://apps/") {
-            if named().any(|a| a.name != "block.name") {
-                return report(cx, p, "Liquid syntax error: in 'block' - app blocks do not accept arguments");
+            if let Some(dynamic) = named().find(|a| a.name != "block.name" && !is_fixed_app_setting(&a.value)) {
+                let message = format!(
+                    "Liquid syntax error: in 'block' - app block settings must be fixed values; '{}' is not a string, number, boolean or array of those",
+                    dynamic.name
+                );
+                return report(cx, dynamic.position, &message);
             }
             if has_content(tag) {
                 return report(cx, p, "Liquid syntax error: in 'block' - app blocks do not accept content");
             }
         }
-    }
-    if let Some(dotted) = named().find(|a| a.name != "block.name" && a.name.contains('.')) {
-        return report(cx, dotted.position, &dotted_argument_message(&dotted.name));
     }
     if named().any(|a| a.name == "block.name" && !matches!(a.value, Node::String(_))) {
         return report(cx, p, SYNTAX_ERROR);
@@ -301,6 +308,19 @@ fn check_block(tag: &LiquidTag<'_>, raw: &str, cx: &LiquidCx<'_, '_>) {
     }
     if has_skipped_characters(raw) {
         report(cx, p, SYNTAX_ERROR);
+    }
+}
+
+/// `isFixedAppSetting(value)`: a string, a number, `true` or `false`, or a flat array of those.
+fn is_fixed_app_setting(value: &Node<'_>) -> bool {
+    let fixed = |n: &Node<'_>| match n {
+        Node::String(_) | Node::Number(_) => true,
+        Node::LiquidLiteral(l) => matches!(l.keyword, "true" | "false"),
+        _ => false,
+    };
+    match value {
+        Node::BlockArrayLiteral(a) => a.elements.iter().all(fixed),
+        other => fixed(other),
     }
 }
 

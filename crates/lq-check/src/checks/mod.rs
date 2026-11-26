@@ -7,6 +7,8 @@ pub mod shared_rules;
 pub mod shared_args;
 pub mod shared_schema;
 pub mod shared_liquid_syntax;
+pub mod shared_range;
+pub mod shared_select;
 pub mod app_block_valid_tags;
 pub mod asset_preload;
 pub mod asset_size_app_block_css;

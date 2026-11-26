@@ -101,23 +101,37 @@ impl Keys<'_, '_, '_> {
     }
 
     fn validate_settings_key(&self, settings_node: Option<&JsonNode<'_>>, valid_settings: Option<&Value>, block: Option<&Value>) -> Js<()> {
-        let Some(node @ JsonNode::Object { .. }) = settings_node else { return Ok(()) };
-        for setting in node.children() {
-            let JsonNode::Property { key, .. } = setting else { continue };
-            let name = setting.property_key().unwrap_or("");
-            let exists = match nullish(valid_settings) {
-                Some(settings) => array_of(settings)?.iter().any(|s| s.get("id").and_then(Value::as_str) == Some(name)),
-                None => false,
-            };
-            if !exists {
-                let message = match block {
-                    Some(b) => format!("Setting '{name}' does not exist in 'blocks/{}.liquid'.", js_string(b.get("type"))),
-                    None => format!("Setting '{name}' does not exist in schema."),
-                };
-                let loc = key.loc();
-                self.cx.report(LiquidProblem::new(message, self.offset + loc.start, self.offset + loc.end));
-            }
-        }
-        Ok(())
+        validate_settings_key(self.cx, self.offset, settings_node, valid_settings, block, "schema")
     }
+}
+
+/// `validateSettingsKey(context, offset, settingsNode, validSettings, blockNode, schemaPath)`.
+/// `schema_path` names the schema in the message when there's no block: `schema`, or a quoted
+/// file in a JSON template.
+pub(super) fn validate_settings_key<C: crate::fixes::Corrector>(
+    cx: &Cx<'_, '_, C>,
+    offset: u32,
+    settings_node: Option<&JsonNode<'_>>,
+    valid_settings: Option<&Value>,
+    block: Option<&Value>,
+    schema_path: &str,
+) -> Js<()> {
+    let Some(node @ JsonNode::Object { .. }) = settings_node else { return Ok(()) };
+    for setting in node.children() {
+        let JsonNode::Property { key, .. } = setting else { continue };
+        let name = setting.property_key().unwrap_or("");
+        let exists = match nullish(valid_settings) {
+            Some(settings) => array_of(settings)?.iter().any(|s| s.get("id").and_then(Value::as_str) == Some(name)),
+            None => false,
+        };
+        if !exists {
+            let message = match block {
+                Some(b) => format!("Setting '{name}' does not exist in 'blocks/{}.liquid'.", js_string(b.get("type"))),
+                None => format!("Setting '{name}' does not exist in {schema_path}."),
+            };
+            let loc = key.loc();
+            cx.report(Problem::new(message, offset + loc.start, offset + loc.end));
+        }
+    }
+    Ok(())
 }
