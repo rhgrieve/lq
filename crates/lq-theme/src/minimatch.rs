@@ -1,11 +1,11 @@
 //! A port of `minimatch` 11.0.9 with default options (and `dot`) on a POSIX platform.
 //!
 //! Compilation follows the upstream steps: comment and negation handling, brace
-//! expansion (`brace-expansion` 5.0.12, `balanced-match` 4.0.4), slash splitting,
-//! level-one optimisation, then one matcher per path portion. A portion without
-//! magic (upstream's `literal()`) is compared as a string; the others compile to a
-//! [`matcher::Matcher`], the port of `@isaacs/nonrecursive-glob-match` that
-//! replaced 10's regexes.
+//! expansion (`brace-expansion` 5.0.12, `balanced-match` 4.0.4) that leaves large
+//! numeric ranges for the matcher, slash splitting, level-one optimisation, then
+//! one matcher per path portion. A portion without magic (upstream's `literal()`)
+//! is compared as a string; the others compile to a [`matcher::Matcher`], the
+//! port of `@isaacs/nonrecursive-glob-match` that replaced 10's regexes.
 //!
 //! Left out because they only make matching faster: `mergeRows` (rows that differ
 //! in one portion merged into an `@(a|b)`), the `#canMatch` checks of the unsplit
@@ -129,7 +129,7 @@ impl Minimatch {
         mm.negate = bangs % 2 == 1;
         let pattern = &pattern[bangs..];
 
-        let globs = brace_expand(pattern);
+        let (globs, range_mark) = expand_braces(pattern);
         let mut seen: Vec<&str> = Vec::new();
         for g in &globs {
             if !seen.contains(&g.as_str()) {
@@ -140,7 +140,7 @@ impl Minimatch {
             let parts = level_one_optimize(slash_split(g));
             let mut segs = Vec::with_capacity(parts.len());
             for p in parts {
-                match parse(p, dot) {
+                match parse(p, dot, range_mark) {
                     Ok(s) => segs.push(s),
                     Err(e) => {
                         mm.error = Some(e);
@@ -806,6 +806,123 @@ fn expand_(s: String, depth: usize, mut is_top: bool) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Numeric ranges
+// ---------------------------------------------------------------------------
+
+/// `RANGE_MIN`: a numeric range with at least this many values is matched as one
+/// pattern portion, rather than expanded.
+const RANGE_MIN: f64 = 100.0;
+
+/// `pattern.replace(rangeRe, ...)` in `#expandBraces`, where `rangeRe` is
+/// `/(?<![\\$])\{(-?\d+)\.\.(-?\d+)\}/g`: each range of at least [`RANGE_MIN`]
+/// values becomes `<mark>lo..hi<mark>`. Also returns whether there was one.
+fn mark_ranges(pattern: &str, mark: char) -> (String, bool) {
+    let b = pattern.as_bytes();
+    let mut out = String::with_capacity(pattern.len());
+    let mut found = false;
+    let (mut copied, mut i) = (0, 0);
+    while i < b.len() {
+        if b[i] != b'{' || (i > 0 && matches!(b[i - 1], b'\\' | b'$')) {
+            i += 1;
+            continue;
+        }
+        let m = (|| {
+            let lo_end = signed_digits(b, i + 1)?;
+            if !pattern[lo_end..].starts_with("..") {
+                return None;
+            }
+            let hi_end = signed_digits(b, lo_end + 2)?;
+            (b.get(hi_end) == Some(&b'}')).then_some((lo_end, hi_end))
+        })();
+        let Some((lo_end, hi_end)) = m else {
+            i += 1;
+            continue;
+        };
+        let (lo, hi) = (&pattern[i + 1..lo_end], &pattern[lo_end + 2..hi_end]);
+        let safe = |s: &str| s.parse::<f64>().ok().filter(|n| n.abs() <= 9_007_199_254_740_991.0);
+        if let (Some(a), Some(z)) = (safe(lo), safe(hi)) {
+            if (a - z).abs() + 1.0 >= RANGE_MIN {
+                found = true;
+                out.push_str(&pattern[copied..i]);
+                out.push(mark);
+                out.push_str(lo);
+                out.push_str("..");
+                out.push_str(hi);
+                out.push(mark);
+                copied = hi_end + 1;
+            }
+        }
+        i = hi_end + 1;
+    }
+    out.push_str(&pattern[copied..]);
+    (out, found)
+}
+
+/// `inRepeatOrNegExt(portion, mark)`: true if a range mark in this portion is
+/// inside a `!(...)`, `*(...)` or `+(...)` extglob. Those repeat or negate their
+/// contents, so one matcher for the whole range does not match the same strings as
+/// the union of one pattern per value. `@(...)` and `?(...)` pick one value at most.
+fn in_repeat_or_neg_ext(portion: &str, mark: char) -> bool {
+    let c: Vec<char> = portion.chars().collect();
+    let mut stack: Vec<char> = Vec::new();
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if ch == '\\' {
+            i += 1;
+        } else if ch == mark {
+            if stack.iter().any(|t| *t != '@' && *t != '?') {
+                return true;
+            }
+        } else if c.get(i + 1) == Some(&'(') && matches!(ch, '!' | '?' | '+' | '*' | '@') {
+            stack.push(ch);
+            i += 1;
+        } else if ch == ')' {
+            stack.pop();
+        }
+        i += 1;
+    }
+    false
+}
+
+/// `#expandBraces()`: brace expansion, except numeric ranges such as `{0..999}`
+/// with at least [`RANGE_MIN`] values. Each of those stays in its pattern between
+/// two marks, a private-use char that the pattern does not contain, for the matcher
+/// to test. If a range might be inside a `[...]` class, or a repeating or negated
+/// extglob, all of them are expanded instead. Returns the mark, if one is used.
+fn expand_braces(pattern: &str) -> (Vec<String>, Option<char>) {
+    let mut code = 0xE000;
+    let mark = loop {
+        let m = char::from_u32(code).expect("private use");
+        if !pattern.contains(m) {
+            break m;
+        }
+        code += 1;
+        if code > 0xF8FF {
+            return (brace_expand(pattern), None);
+        }
+    };
+    let (marked, found) = mark_ranges(pattern, mark);
+    if !found {
+        return (brace_expand(pattern), None);
+    }
+    let set = brace_expand(&marked);
+    for p in &set {
+        for portion in p.split('/') {
+            if let (Some(c), Some(m)) = (portion.find('['), portion.rfind(mark)) {
+                if c < m {
+                    return (brace_expand(pattern), None);
+                }
+            }
+            if in_repeat_or_neg_ext(portion, mark) {
+                return (brace_expand(pattern), None);
+            }
+        }
+    }
+    (set, Some(mark))
+}
+
+// ---------------------------------------------------------------------------
 // Portion parsing
 // ---------------------------------------------------------------------------
 
@@ -894,18 +1011,20 @@ fn extglob_count(pattern: &str) -> usize {
 }
 
 /// `parse(pattern)` for one portion: `**`, a literal, or a [`Matcher`].
-fn parse(p: &str, dot: bool) -> Result<Seg, String> {
+fn parse(p: &str, dot: bool, range_mark: Option<char>) -> Result<Seg, String> {
     if p == "**" {
         return Ok(Seg::Globstar);
     }
     if p.is_empty() {
         return Ok(Seg::Lit(String::new()));
     }
+    let has_mark = range_mark.is_some_and(|m| p.contains(m));
     // Most portions have no syntax at all, and so are their own literal.
-    if !p.bytes().any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | b'(')) {
+    if !has_mark && !p.bytes().any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | b'(')) {
         return Ok(Seg::Lit(p.to_string()));
     }
-    if let Some(l) = literal(p) {
+    let lit = if has_mark { None } else { literal(p) };
+    if let Some(l) = lit {
         return Ok(Seg::Lit(l));
     }
     // `assertValidExtglobs`: the matcher compiles and walks extglobs recursively, so
@@ -913,7 +1032,7 @@ fn parse(p: &str, dot: bool) -> Result<Seg, String> {
     if extglob_count(p) > MAX_EXTGLOBS {
         return Err("pattern has too many extglobs".into());
     }
-    Ok(Seg::Magic(Matcher::new(p, dot)))
+    Ok(Seg::Magic(Matcher::new(p, dot, range_mark)))
 }
 
 #[cfg(test)]
@@ -997,6 +1116,24 @@ mod tests {
         assert!(minimatch("\\a", "\\\\{a,b}"));
         assert!(!minimatch("a", "\\\\{a,b}"));
         assert!(!minimatch("a\\x", "{a,b}\\\\\\*"));
+    }
+
+    // Ranges of 100 values or more are matched, not expanded, so they are not cut
+    // off at brace-expansion's 100,000 values.
+    #[test]
+    fn numeric_ranges() {
+        assert!(minimatch("150000", "{1..200000}"));
+        assert!(minimatch("x/1000", "x/{1..1000}"));
+        assert!(!minimatch("x/1001", "x/{1..1000}"));
+        assert!(!minimatch("x/0", "x/{1..1000}"));
+        assert!(minimatch("001", "{001..150}"));
+        assert!(!minimatch("1", "{001..150}"));
+        assert!(minimatch("-05", "{-05..120}"));
+        assert!(minimatch("007", "{-05..120}"));
+        assert!(!minimatch("7", "{-05..120}"));
+        assert!(minimatch("a120b", "a{150..1}b"));
+        // in a repeating extglob, each value is its own pattern
+        assert!(!minimatch("510", "*({1..150})"));
     }
 
     // The ** before a body section can walk up to where the section and the ones

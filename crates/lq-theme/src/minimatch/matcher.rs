@@ -4,7 +4,7 @@
 //! The pattern becomes a state machine (literal chars, `?`, `*`, classes, splits
 //! for extglob alternatives, and negation nodes for `!(...)`), simulated one code
 //! point at a time without backtracking. Only the options minimatch passes here
-//! is ported: `dot`. `nocase`, `noext` and `normalize` are never
+//! are ported: `dot` and `rangeMark`. `nocase`, `noext` and `normalize` are never
 //! set by lq. Upstream's DFA cache of simulation states is left out: it only
 //! memoizes [`Sim::step`], and a cached state holds the same threads as a fresh
 //! one.
@@ -18,6 +18,8 @@ use std::sync::Arc;
 enum Class {
     /// `/$./`, from an empty or invalid class: matches nothing.
     Never,
+    /// `/^[a-b]$/` for the digit classes of a numeric range.
+    Digits(char, char),
     /// The `u`-mode RegExp that `parseClass` builds.
     Re(Box<JsRegex>),
 }
@@ -26,6 +28,7 @@ impl Class {
     fn test(&self, c: char) -> bool {
         match self {
             Class::Never => false,
+            Class::Digits(a, b) => (*a..=*b).contains(&c),
             Class::Re(re) => re.is_match(c.encode_utf8(&mut [0; 4])),
         }
     }
@@ -186,14 +189,151 @@ fn parse_class(glob: &[char], pos: usize) -> (Class, usize) {
 }
 
 // ---------------------------------------------------------------------------
+// numeric-range.ts
+// ---------------------------------------------------------------------------
+
+/// `digit(a, b)`: one digit, or a class of digits from a to b.
+fn digit(a: u8, b: u8) -> Item {
+    let (ca, cb) = (char::from(b'0' + a), char::from(b'0' + b));
+    if a == b {
+        Item::Lit(ca)
+    } else {
+        Item::Class(Arc::new(Class::Digits(ca, cb)))
+    }
+}
+
+fn prefix(d: u8, alts: Vec<Vec<Item>>) -> Vec<Vec<Item>> {
+    alts.into_iter()
+        .map(|s| {
+            let mut v = vec![digit(d, d)];
+            v.extend(s);
+            v
+        })
+        .collect()
+}
+
+/// `fixed(a, b)`: the digit strings from a to b, which have the same length.
+fn fixed(a: &[u8], b: &[u8]) -> Vec<Vec<Item>> {
+    if a.is_empty() {
+        return vec![Vec::new()];
+    }
+    let mut lo = a[0] - b'0';
+    let mut hi = b[0] - b'0';
+    let (ra, rb) = (&a[1..], &b[1..]);
+    if lo == hi {
+        return prefix(lo, fixed(ra, rb));
+    }
+    let zeros = vec![b'0'; ra.len()];
+    let nines = vec![b'9'; ra.len()];
+    let mut out = Vec::new();
+    if ra != zeros.as_slice() {
+        out.extend(prefix(lo, fixed(ra, &nines)));
+        lo += 1;
+    }
+    let last = if rb == nines.as_slice() {
+        Vec::new()
+    } else {
+        let l = prefix(hi, fixed(&zeros, rb));
+        hi -= 1;
+        l
+    };
+    if lo <= hi {
+        let mut v = vec![digit(lo, hi)];
+        v.extend(ra.iter().map(|_| digit(0, 9)));
+        out.push(v);
+    }
+    out.extend(last);
+    out
+}
+
+fn pad(n: i64, width: usize) -> Vec<u8> {
+    format!("{n:0>width$}").into_bytes()
+}
+
+/// `nonneg(a, b, width)`: the numbers from a to b, where 0 <= a <= b, each with
+/// leading zeros to `width` digits if it is set.
+fn nonneg(a: i64, b: i64, width: usize) -> Vec<Vec<Item>> {
+    if width > 0 {
+        return fixed(&pad(a, width), &pad(b, width));
+    }
+    let mut out = Vec::new();
+    let (la, lb) = (a.to_string().len(), b.to_string().len());
+    for len in la..=lb {
+        let lo = a.max(if len == 1 { 0 } else { 10i64.pow(len as u32 - 1) });
+        let hi = b.min(10i64.pow(len as u32) - 1);
+        out.extend(fixed(lo.to_string().as_bytes(), hi.to_string().as_bytes()));
+    }
+    out
+}
+
+/// `Number(s)` for a `-?\d+` string, if it is a safe integer.
+fn safe_integer(s: &str) -> Option<i64> {
+    let n: f64 = s.parse().ok()?;
+    (n.abs() <= 9_007_199_254_740_991.0).then_some(n as i64)
+}
+
+/// `numericRange(lo, hi)`: the strings of the bash brace expansion `{lo..hi}`, as
+/// the alternatives of an `@(...)` extglob of digits and digit classes.
+fn numeric_range(lo_str: &str, hi_str: &str) -> Option<Vec<Vec<Item>>> {
+    let mut lo = safe_integer(lo_str)?;
+    let mut hi = safe_integer(hi_str)?;
+    if lo > hi {
+        std::mem::swap(&mut lo, &mut hi);
+    }
+    // `/^-?0\d/`
+    let padded = |s: &str| {
+        let b = s.strip_prefix('-').unwrap_or(s).as_bytes();
+        b.len() >= 2 && b[0] == b'0' && b[1].is_ascii_digit()
+    };
+    let width = if padded(lo_str) || padded(hi_str) { lo_str.len().max(hi_str.len()) } else { 0 };
+    let mut out = Vec::new();
+    if lo < 0 {
+        for s in nonneg((-hi).max(1), -lo, width.saturating_sub(1)) {
+            let mut v = vec![Item::Lit('-')];
+            v.extend(s);
+            out.push(v);
+        }
+    }
+    if hi >= 0 {
+        out.extend(nonneg(lo.max(0), hi, width));
+    }
+    Some(out)
+}
+
+// ---------------------------------------------------------------------------
 // index.ts: parsing
 // ---------------------------------------------------------------------------
 
-fn tokenize(p: &[char], noext: bool) -> Vec<Tok> {
+/// `/^(-?\d+)\.\.(-?\d+)$/`
+fn range_body(s: &str) -> Option<(&str, &str)> {
+    let (a, b) = s.split_once("..")?;
+    let int = |x: &str| {
+        let d = x.strip_prefix('-').unwrap_or(x);
+        !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit())
+    };
+    (int(a) && int(b)).then_some((a, b))
+}
+
+fn tokenize(p: &[char], noext: bool, mark: Option<char>) -> Vec<Tok> {
     let mut toks = Vec::with_capacity(p.len());
     let mut i = 0;
     while i < p.len() {
         let c = p[i];
+        if let Some(mark) = mark {
+            // a \ before a range would only escape its first char
+            let m = usize::from(c == '\\' && p.get(i + 1) == Some(&mark));
+            if m == 1 || c == mark {
+                let start = i + m + 1;
+                if let Some(end) = p[start.min(p.len())..].iter().position(|x| *x == mark).map(|e| e + start) {
+                    let body: String = p[start..end].iter().collect();
+                    if let Some(alts) = range_body(&body).and_then(|(a, b)| numeric_range(a, b)) {
+                        toks.push(Tok::Item(Item::Ext('@', alts)));
+                        i = end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
         if c == '\\' {
             // a trailing \ is a literal \
             toks.push(Tok::Item(Item::Lit(p.get(i + 1).copied().unwrap_or(c))));
@@ -608,7 +748,7 @@ fn test_linear(nodes: &[Linear], chars: &[char], start: usize, end: usize) -> bo
     ni == nodes.len()
 }
 
-/// `new Matcher(pattern, { dot })` for one path portion.
+/// `new Matcher(pattern, { dot, rangeMark })` for one path portion.
 #[derive(Debug)]
 pub(super) struct Matcher {
     dot: bool,
@@ -631,12 +771,12 @@ pub(super) struct Matcher {
 }
 
 impl Matcher {
-    pub(super) fn new(pattern: &str, dot: bool) -> Matcher {
+    pub(super) fn new(pattern: &str, dot: bool, range_mark: Option<char>) -> Matcher {
         let p: Vec<char> = pattern.chars().collect();
         // a pattern that is only an empty extglob is a literal string, except for
         // `!()`, which matches any non-empty string
         let literal = p.len() == 3 && matches!(p[0], '?' | '*' | '+' | '@') && p[1] == '(' && p[2] == ')';
-        let toks = tokenize(&p, literal);
+        let toks = tokenize(&p, literal, range_mark);
         let pairs = pair(&toks);
         let items = build(&toks, &pairs, 0, toks.len(), true).swap_remove(0);
         let (nodes, start) = compile(&items);
