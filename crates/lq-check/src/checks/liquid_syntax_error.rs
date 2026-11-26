@@ -793,7 +793,7 @@ fn check_comment_raw_tag(tag: &LiquidRawTag<'_>, cx: &LiquidCx<'_, '_>) {
     if !value.contains("{%") && !value.contains("{{") {
         return;
     }
-    let tokens = tokenize(value, TokenizeOptions::default());
+    let tokens = tokenize(value, TokenizeOptions::for_target(lq_syntax::ParseTarget::Main));
     let source = cx.source();
     let after = tag.block_end_position.end;
     if has_unbalanced_nested_tags(value, &tokens, source, after, "comment")

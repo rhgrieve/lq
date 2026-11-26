@@ -153,7 +153,7 @@ pub fn css_classes_from_liquid_uri(uri: &str, fs: &dyn FileSystem) -> BTreeSet<S
     if !may_have_stylesheet(&source) {
         return BTreeSet::new();
     }
-    match lq_syntax::parse_strict(&source) {
+    match lq_syntax::parse_strict_for(&source, lq_syntax::ParseTarget::Main) {
         Ok(doc) => css_classes_from_liquid_ast(&doc.root),
         Err(_) => BTreeSet::new(),
     }
@@ -224,7 +224,7 @@ pub fn collect_used_classes(attributes: &[Node<'_>], used: &mut Vec<UsedClass>) 
 /// `collectUsedClassesFromSvg(attributes, bodyValue, bodyStartOffset, usedClasses)`.
 pub fn collect_used_classes_from_svg(attributes: &[Node<'_>], body: &str, body_start: u32, used: &mut Vec<UsedClass>) {
     collect_used_classes(attributes, used);
-    let Ok(doc) = lq_syntax::parse_strict(body) else { return };
+    let Ok(doc) = lq_syntax::parse_strict_for(body, lq_syntax::ParseTarget::Main) else { return };
     let mut inner = Vec::new();
     visit(&doc.root, &mut |node, _| match node {
         Node::HtmlElement(n) => collect_used_classes(&n.attributes, &mut inner),

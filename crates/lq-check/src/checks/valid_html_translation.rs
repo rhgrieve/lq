@@ -22,7 +22,7 @@ impl<'a> JsonCheck<'a> for ValidHtmlTranslation {
         if !has_html(value) {
             return;
         }
-        if let Err(error) = lq_syntax::parse_strict(value) {
+        if let Err(error) = lq_syntax::parse_strict_for(value, lq_syntax::ParseTarget::Main) {
             cx.report(JsonProblem::new(format!("{error}."), loc.start, loc.end));
         }
     }
