@@ -210,7 +210,15 @@ node_structs! {
         block_end_position: Position,
     }
     HtmlDoctype { legacy_doctype_string: Option<&'s str> }
-    HtmlComment { body: &'s str }
+    HtmlComment {
+        body: &'s str,
+        /// On `main` (31f66557), the text and Liquid between the delimiters, and
+        /// the ranges of the `<!--` and `-->`, each empty where a Liquid block
+        /// boundary splits the comment. Empty and zero on 2.11.0.
+        children: Vec<Node<'s>>,
+        block_start_position: Position,
+        block_end_position: Position,
+    }
     HtmlDanglingMarkerClose { name: Vec<Node<'s>>, block_start_position: Position }
     /// `AttrSingleQuoted`, `AttrDoubleQuoted` and `AttrUnquoted`.
     AttrNode { name: Vec<Node<'s>>, value: Vec<Node<'s>>, attribute_position: Position }
@@ -505,9 +513,9 @@ macro_rules! visit_children {
             Node::LiquidDocExampleNode(n) => $f(& $($m)? n.content),
             Node::LiquidDocPromptNode(n) => $f(& $($m)? n.content),
             Node::BlockArrayLiteral(n) => { for c in & $($m)? n.elements { $f(c); } }
+            Node::HtmlComment(n) => { for c in & $($m)? n.children { $f(c); } }
             Node::YamlFrontmatter(_)
             | Node::HtmlDoctype(_)
-            | Node::HtmlComment(_)
             | Node::TextNode(_)
             | Node::LiquidLiteral(_)
             | Node::String(_)
@@ -688,6 +696,8 @@ pub struct Document<'s> {
     pub root: Node<'s>,
     /// The number of nodes; ids are `0..node_count`.
     pub node_count: u32,
+    /// The parser the tree came from, which decides the fields it has upstream.
+    pub target: crate::ParseTarget,
 }
 
 impl<'s> Document<'s> {

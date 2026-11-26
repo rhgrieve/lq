@@ -8,6 +8,8 @@ use crate::source_map::SourceMap;
 struct W<'m, 's> {
     out: String,
     map: &'m SourceMap<'s>,
+    /// The tree is `ParseTarget::Main`'s, which has more fields.
+    main: bool,
 }
 
 impl W<'_, '_> {
@@ -209,7 +211,14 @@ impl W<'_, '_> {
                 self.pos("blockEndPosition", n.block_end_position);
             }
             Node::HtmlDoctype(n) => self.opt_str_field("legacyDoctypeString", n.legacy_doctype_string),
-            Node::HtmlComment(n) => self.str_field("body", n.body),
+            Node::HtmlComment(n) => {
+                self.str_field("body", n.body);
+                if self.main {
+                    self.list("children", &n.children);
+                    self.pos("blockStartPosition", n.block_start_position);
+                    self.pos("blockEndPosition", n.block_end_position);
+                }
+            }
             Node::HtmlDanglingMarkerClose(n) => {
                 self.list("name", &n.name);
                 self.pos("blockStartPosition", n.block_start_position);
@@ -368,12 +377,13 @@ impl W<'_, '_> {
 }
 
 fn writer<'m, 's>(map: &'m SourceMap<'s>) -> W<'m, 's> {
-    W { out: String::new(), map }
+    W { out: String::new(), map, main: false }
 }
 
 /// `{"ast": <node>}`.
 pub fn ast_line(doc: &Document<'_>, map: &SourceMap<'_>) -> String {
     let mut w = writer(map);
+    w.main = doc.target.is_main();
     w.out.reserve(doc.source.len() * 4);
     w.out.push_str("{\"ast\":");
     w.node(&doc.root);
@@ -382,9 +392,8 @@ pub fn ast_line(doc: &Document<'_>, map: &SourceMap<'_>) -> String {
 }
 
 /// `{"error": {"name", "message", "loc"}}`.
-pub fn error_line(e: &ParseError) -> String {
-    let source_map = SourceMap::new("");
-    let mut w = writer(&source_map);
+pub fn error_line(e: &ParseError, map: &SourceMap<'_>) -> String {
+    let mut w = writer(map);
     w.out.push_str("{\"error\":{\"name\":");
     w.string(&e.name);
     w.out.push_str(",\"message\":");
@@ -396,6 +405,14 @@ pub fn error_line(e: &ParseError) -> String {
             l.start.line, l.start.column, l.end.line, l.end.column
         )),
         None => w.out.push_str("null"),
+    }
+    // Only `ParseTarget::Main` sets it, so 2.11.0's shape is unchanged.
+    if let Some(u) = &e.unclosed {
+        w.out.push_str(",\"unclosed\":{\"type\":");
+        w.string(u.node_type);
+        w.str_field("name", &u.name);
+        w.pos("blockStartPosition", u.block_start_position);
+        w.out.push('}');
     }
     w.out.push_str("}}");
     w.out

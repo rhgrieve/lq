@@ -29,6 +29,8 @@ pub struct MarkupParser<'s> {
     lax: bool,
     tolerant: bool,
     in_condition: bool,
+    /// `ParseTarget::Main`.
+    main: bool,
 }
 
 struct Run<'s> {
@@ -93,7 +95,15 @@ impl<'s> MarkupParser<'s> {
             lax: false,
             tolerant: false,
             in_condition: false,
+            main: false,
         }
+    }
+
+    /// Parse as `target` does. On `main`, Object.prototype names such as
+    /// `constructor` are ordinary names, not keywords (a73b174f).
+    pub fn set_target(&mut self, target: crate::ParseTarget) -> &mut Self {
+        self.main = target.is_main();
+        self
     }
 
     pub fn enable_lax(&mut self) -> &mut Self {
@@ -301,7 +311,14 @@ impl<'s> MarkupParser<'s> {
                     }
                     _ => false,
                 };
-                if let Some(value) = literal_value(token.value) {
+                if let Some(value) = literal_value(token.value).filter(|v| {
+                    // `isLiteralKeyword` is a switch on main, not `in`.
+                    !(self.main
+                        && matches!(
+                            v,
+                            LiteralValue::ObjectPrototype | LiteralValue::ObjectPrototypeFunction
+                        ))
+                }) {
                     if !self.look(T::Dot, 1)
                         && !followed_by_bracket_lookup
                         && !(self.lax && self.lax_lookup_separator_follows(token.end))
@@ -694,6 +711,7 @@ impl<'s> MarkupParser<'s> {
             Some(self.markup_end),
         );
         rest_parser.enable_lax();
+        rest_parser.main = self.main;
         let right = if rest_parser.at_value_start() {
             rest_parser.value_expression()?
         } else {

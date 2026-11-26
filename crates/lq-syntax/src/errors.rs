@@ -48,8 +48,9 @@ impl std::error::Error for ParseError {}
 /// A thrown error inside the parser.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
-    /// `LiquidHTMLASTParsingError`, with source offsets in bytes.
-    Parsing { message: String, start: u32, end: u32 },
+    /// `LiquidHTMLASTParsingError`, with source offsets in bytes. `unclosed` is
+    /// only ever set by `ParseTarget::Main` (33b1f3aa).
+    Parsing { message: String, start: u32, end: u32, unclosed: Option<Box<UnclosedNode>> },
     /// Any other `Error`.
     Other { name: &'static str, message: String },
 }
@@ -58,7 +59,17 @@ pub type PResult<T> = Result<T, Failure>;
 
 impl Failure {
     pub fn parsing(message: impl Into<String>, start: u32, end: u32) -> Self {
-        Failure::Parsing { message: message.into(), start, end }
+        Failure::Parsing { message: message.into(), start, end, unclosed: None }
+    }
+
+    /// A parsing failure that names the node that was never closed.
+    pub fn unclosed(
+        message: impl Into<String>,
+        start: u32,
+        end: u32,
+        unclosed: Option<UnclosedNode>,
+    ) -> Self {
+        Failure::Parsing { message: message.into(), start, end, unclosed: unclosed.map(Box::new) }
     }
 
     pub fn error(message: impl Into<String>) -> Self {
@@ -80,11 +91,11 @@ impl Failure {
 
     pub fn into_parse_error(self, source: &str) -> ParseError {
         match self {
-            Failure::Parsing { message, start, end } => ParseError {
+            Failure::Parsing { message, start, end, unclosed } => ParseError {
                 name: PARSING_ERROR_NAME.to_string(),
                 message,
                 loc: Some(resolve_loc(source, start, end)),
-                unclosed: None,
+                unclosed: unclosed.map(|u| *u),
             },
             Failure::Other { name, message } => {
                 ParseError { name: name.to_string(), message, loc: None, unclosed: None }

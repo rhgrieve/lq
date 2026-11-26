@@ -5,6 +5,7 @@ use super::liquid_blocks::{finalize_branch, is_branch_name, parse_branch_markup_
 use super::liquid_raw::raw_markup_kind_for_tag;
 use super::liquid_tags::UNEXPECTED_TOKENS;
 use super::parser::DocumentParser;
+use super::raw_body;
 use super::tree_builder::{filter_children, ChildFilterMode};
 use crate::ast::*;
 use crate::errors::{Failure, PResult};
@@ -43,7 +44,7 @@ impl<'s> StatementParser<'s> for DocumentParser<'s> {
             ));
         }
 
-        let Some(def) = tags::tag_for_name(tag_name) else {
+        let Some(def) = self.tag_for_name(tag_name) else {
             return Ok(make_liquid_tag_base_case(&envelope, TagBody::default(), None, false));
         };
 
@@ -56,6 +57,7 @@ impl<'s> StatementParser<'s> for DocumentParser<'s> {
                     Some(markup_offset),
                     Some(envelope.markup_end),
                 );
+                markup_parser.set_target(self.target);
                 if self.tolerant {
                     markup_parser.enable_tolerant();
                 }
@@ -78,7 +80,9 @@ impl<'s> StatementParser<'s> for DocumentParser<'s> {
             TagDefinition::Block { id, branches } => {
                 self.parse_line_block_tag(id, branches, &envelope, markup_string, markup_offset, ctx)
             }
-            TagDefinition::Raw { .. } => self.parse_line_raw_tag(&envelope, ctx),
+            TagDefinition::Raw { parse_liquid_in_body, .. } => {
+                self.parse_line_raw_tag(&envelope, parse_liquid_in_body, ctx)
+            }
             TagDefinition::ObjectPrototype => Err(Failure::error(ASSERT_NEVER_MESSAGE)),
         }
     }
@@ -97,6 +101,7 @@ impl<'s> DocumentParser<'s> {
     ) -> PResult<Node<'s>> {
         let tokens = tokenize_markup(markup_string, markup_offset);
         let mut markup_parser = MarkupParser::new(tokens, self.source, None, None);
+        markup_parser.set_target(self.target);
         if self.tolerant {
             markup_parser.enable_tolerant();
         }
@@ -127,6 +132,7 @@ impl<'s> DocumentParser<'s> {
     fn parse_line_raw_tag(
         &mut self,
         envelope: &LiquidTagEnvelope<'s>,
+        parse_liquid_in_body: bool,
         ctx: &mut LiquidLineContext<'s>,
     ) -> PResult<Node<'s>> {
         let tag_name = envelope.tag_name;
@@ -147,7 +153,13 @@ impl<'s> DocumentParser<'s> {
 
         let balanced = tag_name == "comment" || tag_name == "doc";
         let mut end_line_index = None;
-        if balanced {
+        if self.main {
+            // Each raw tag ends its body by its own rule (e391d5ca): `raw` and
+            // the other `Liquid::Raw` tags cannot close inside `{% liquid %}`.
+            end_line_index = raw_body::rule_for(tag_name).and_then(|rule| {
+                raw_body::find_raw_line_body_end(source, &ctx.lines, ctx.index, tag_name, rule)
+            });
+        } else if balanced {
             let mut depth = 0;
             let mut i = ctx.index;
             while i < ctx.lines.len() {
@@ -188,7 +200,25 @@ impl<'s> DocumentParser<'s> {
         let body_end_offset = end_line.name_offset;
         let body_string = js::slice(source, body_content_start, body_end_offset);
 
-        let body_nodes = if body_content_start < body_end_offset {
+        // On main (911a4513) a tag that parses Liquid in its body (`style`, the
+        // only one that can close here) gets Liquid statements, one per line.
+        let parses_liquid = self.main && parse_liquid_in_body;
+        let body_nodes = if parses_liquid {
+            let mut body_ctx =
+                LiquidLineContext { lines: ctx.lines[..end_line_index].to_vec(), index: ctx.index };
+            let mut statements = Vec::new();
+            while body_ctx.index < body_ctx.lines.len() {
+                let line = body_ctx.lines[body_ctx.index];
+                body_ctx.index += 1;
+                statements.push(self.parse_liquid_statement(
+                    line.tag_name,
+                    line.markup,
+                    line.markup_offset,
+                    &mut body_ctx,
+                )?);
+            }
+            statements
+        } else if body_content_start < body_end_offset {
             filter_children(
                 ChildFilterMode::Syntactic,
                 vec![make_text_node(body_string, body_content_start, body_end_offset)],
@@ -199,17 +229,22 @@ impl<'s> DocumentParser<'s> {
         };
 
         let body = make_raw_markup(
-            raw_markup_kind_for_tag(tag_name, body_string),
+            if parses_liquid {
+                RawMarkupKind::Text
+            } else {
+                raw_markup_kind_for_tag(tag_name, body_string)
+            },
             body_string,
             body_nodes,
             position_start_offset,
             body_end_offset,
         );
 
-        let end_position = Position::new(
-            end_line.name_offset,
-            end_line.name_offset + end_line.tag_name.len() as u32,
-        );
+        // `endTagName.length` on main, where the line's name may run on past it.
+        let end_name_len =
+            if self.main { tag_name.len() + 3 } else { end_line.tag_name.len() };
+        let end_position =
+            Position::new(end_line.name_offset, end_line.name_offset + end_name_len as u32);
         ctx.index = end_line_index + 1;
 
         Ok(make_liquid_raw_tag(
@@ -299,6 +334,7 @@ impl<'s> DocumentParser<'s> {
                     branch_envelope.markup_offset,
                     source,
                     self.tolerant,
+                    self.target,
                 );
                 let next = make_liquid_branch_named(&branch_envelope, branch_markup);
                 let finished = std::mem::replace(&mut current_branch, next);

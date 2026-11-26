@@ -21,6 +21,7 @@ impl<'s> DocumentParser<'s> {
 
         let tokens = tokenize_markup(raw_markup, open_token.end);
         let mut markup_parser = MarkupParser::new(tokens, source, None, None);
+        markup_parser.set_target(self.target);
         if self.tolerant {
             markup_parser.enable_tolerant();
         }

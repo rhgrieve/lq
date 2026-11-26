@@ -3,13 +3,54 @@
 use super::factories::*;
 use super::liquid_raw::has_liquid_open;
 use super::parser::DocumentParser;
+use super::raw_body;
 use super::tokenizer::{Token, TokenType};
 use super::tree_builder::{compound_names_match, filter_children, ChildFilterMode};
 use crate::ast::*;
-use crate::errors::{Failure, PResult};
+use crate::errors::{Failure, PResult, UnclosedNode};
 use crate::grammar::{BLOCKS, HTML_RAW_TAGS, VOID_ELEMENTS};
 use crate::js;
 use std::borrow::Cow;
+
+/// `findRawTextClose` (64e4ffb3): where the first `</tag_name>` after `from`
+/// starts and ends, read from the source. Liquid delimiters are skipped the way
+/// the tokenizer skips them, and so is the body of a Liquid raw tag, so a close
+/// tag inside either does not count. An unterminated delimiter or raw tag leaves
+/// the element unclosed.
+fn find_raw_text_close(source: &str, from: usize, tag_name: &str) -> Option<(u32, u32)> {
+    let b = source.as_bytes();
+    let name = tag_name.as_bytes();
+    let mut i = from;
+    while i < b.len() {
+        if b[i] == b'{' && matches!(b.get(i + 1), Some(b'{') | Some(b'%')) {
+            let tag = b[i + 1] == b'%';
+            let closer: &[u8] = if tag { b"%}" } else { b"}}" };
+            let token_end = i + 2 + memchr::memmem::find(&b[i + 2..], closer)? + 2;
+            let raw = if tag { raw_body::liquid_tag_token_name(&source[i..token_end]) } else { None };
+            match raw.and_then(|n| raw_body::rule_for(n).map(|r| (n, r))) {
+                Some((n, rule)) => {
+                    i = raw_body::find_raw_body_end(source, token_end, n, rule, None)?.tag_end as usize;
+                }
+                None => i = token_end,
+            }
+            continue;
+        }
+        if b[i..].starts_with(b"</")
+            && b.len() >= i + 2 + name.len()
+            && b[i + 2..i + 2 + name.len()].eq_ignore_ascii_case(name)
+        {
+            // `/\s*>/y`
+            let after = i + 2 + name.len();
+            let rest = &source[after..];
+            let ws = rest.len() - js::trim_start(rest).len();
+            if b.get(after + ws) == Some(&b'>') {
+                return Some((i as u32, (after + ws + 1) as u32));
+            }
+        }
+        i += 1;
+    }
+    None
+}
 
 fn is_branch_keyword(name: &str) -> bool {
     matches!(name, "else" | "elsif" | "when")
@@ -138,6 +179,19 @@ impl<'s> DocumentParser<'s> {
             }
         }
 
+        // The element name as written, Liquid included: `h{{ level }}`.
+        let name_source = match (name.first(), name.last()) {
+            (Some(a), Some(b)) => js::slice(source, a.position().start, b.position().end),
+            _ => "",
+        };
+        let main = self.main;
+        let unclosed = || {
+            main.then(|| UnclosedNode {
+                node_type: "HtmlElement",
+                name: name_source.to_string(),
+                block_start_position,
+            })
+        };
         let mut children: Vec<Node<'s>> = Vec::new();
         while !self.is_at_end() {
             if self.check(TokenType::HtmlCloseTagOpen) {
@@ -146,13 +200,14 @@ impl<'s> DocumentParser<'s> {
             if self.is_block_terminator() {
                 if !self.allow_unclosed_html {
                     let tag_name = self.peek_tag_name().unwrap_or("");
-                    return Err(Failure::parsing(
+                    return Err(Failure::unclosed(
                         format!(
                             "Attempting to close LiquidTag '{tag_name}' before HtmlElement '{}' was closed",
                             display_name(plain_name)
                         ),
                         open_tag_start,
                         open_tag_end,
+                        unclosed(),
                     ));
                 }
                 break;
@@ -162,13 +217,14 @@ impl<'s> DocumentParser<'s> {
 
         if self.is_at_end() || (self.allow_unclosed_html && self.is_block_terminator()) {
             if !self.allow_unclosed_html {
-                return Err(Failure::parsing(
+                return Err(Failure::unclosed(
                     format!(
                         "Attempting to end parsing before HtmlElement '{}' was closed",
                         display_name(plain_name)
                     ),
                     open_tag_start,
                     open_tag_end,
+                    unclosed(),
                 ));
             }
             let end_pos = children.last().map_or(open_tag_end, |c| c.position().end);
@@ -190,7 +246,7 @@ impl<'s> DocumentParser<'s> {
 
         if !compound_names_match(&name, &close_name, source) {
             let close_plain_name = extract_plain_name(&close_name);
-            return Err(Failure::parsing(
+            return Err(Failure::unclosed(
                 format!(
                     "Attempting to close HtmlElement '{}' before HtmlElement '{}' was closed",
                     display_name(close_plain_name),
@@ -198,6 +254,7 @@ impl<'s> DocumentParser<'s> {
                 ),
                 close_start,
                 close_end,
+                unclosed(),
             ));
         }
 
@@ -250,15 +307,34 @@ impl<'s> DocumentParser<'s> {
         let source = self.source;
         let body_start = block_start_position.end;
 
-        let Some(close_idx) = self.scan_for_html_close_tag(plain_name) else {
-            return Err(Failure::parsing(
-                format!("Attempting to end parsing before HtmlRawNode '{plain_name}' was closed"),
-                block_start_position.start,
-                block_start_position.end,
-            ));
+        let close_idx = self.scan_for_html_close_tag(plain_name);
+        // On `main` a `<script>` or `<style>` body is raw text (64e4ffb3). The
+        // tokenizer already read it so; when its close is still not among the
+        // tokens, find it in the source and tokenize the body again.
+        let raw_text = if self.main
+            && close_idx.is_none()
+            && (js::lower_eq(plain_name, "script") || js::lower_eq(plain_name, "style"))
+        {
+            find_raw_text_close(source, body_start as usize, plain_name)
+        } else {
+            None
+        };
+        let body_end = match (raw_text, close_idx) {
+            (Some((start, end)), _) => {
+                self.retokenize_raw_text(body_start, start, end);
+                start
+            }
+            (None, Some(close_idx)) => self.tokens[close_idx].start,
+            (None, None) => {
+                return Err(Failure::unclosed(
+                    format!("Attempting to end parsing before HtmlRawNode '{plain_name}' was closed"),
+                    block_start_position.start,
+                    block_start_position.end,
+                    self.unclosed("HtmlRawNode", plain_name, block_start_position),
+                ));
+            }
         };
 
-        let body_end = self.tokens[close_idx].start;
         let body_string = js::slice(source, body_start, body_end);
 
         let body_nodes = self.parse_liquid_in_range(body_end)?;
@@ -288,6 +364,9 @@ impl<'s> DocumentParser<'s> {
 
     // htmlComment := "<!--" text* "-->"
     pub fn parse_html_comment(&mut self) -> PResult<Node<'s>> {
+        if self.main {
+            return self.parse_html_comment_main();
+        }
         let source = self.source;
         let open_token = self.consume(TokenType::HtmlCommentOpen)?;
         let body_start = open_token.end;
@@ -310,6 +389,64 @@ impl<'s> DocumentParser<'s> {
             id: ID0,
             position: Position::new(open_token.start, comment_end),
             body,
+            children: Vec::new(),
+            block_start_position: Position::default(),
+            block_end_position: Position::default(),
+        })))
+    }
+
+    // htmlComment := "<!--"? (text | liquidVariableOutput | liquidTag)* "-->"?
+    //
+    // `parseHtmlComment` on main (31f66557): the body is parsed as text and
+    // Liquid, never as markup. When the body reaches a tag that ends or branches
+    // an enclosing block, the comment stops before that tag and `parse_node`
+    // resumes it after the tag. When a block opened inside the comment consumes
+    // the `-->`, the comment ends with that block.
+    fn parse_html_comment_main(&mut self) -> PResult<Node<'s>> {
+        let source = self.source;
+        let start = self.peek().start;
+        let mut block_start_position = Position::new(start, start);
+        if let Some(open) = self.accept(TokenType::HtmlCommentOpen) {
+            block_start_position = Position::new(open.start, open.end);
+            self.open_html_comment = Some(block_start_position);
+        }
+
+        let mut children = Vec::new();
+        let mut block_end_position = None;
+        let saved_parse_html = self.parse_html;
+        self.parse_html = false;
+        let result = (|| {
+            while self.open_html_comment.is_some() {
+                // A browser ends an unclosed comment at the end of the input.
+                if self.is_at_end() {
+                    self.open_html_comment = None;
+                    break;
+                }
+                if let Some(close) = self.accept(TokenType::HtmlCommentClose) {
+                    block_end_position = Some(Position::new(close.start, close.end));
+                    self.open_html_comment = None;
+                    break;
+                }
+                if self.is_block_terminator() {
+                    break;
+                }
+                children.push(self.parse_node()?);
+            }
+            Ok(())
+        })();
+        // The `finally`.
+        self.parse_html = saved_parse_html;
+        result?;
+
+        let end = self.peek().start;
+        let block_end_position = block_end_position.unwrap_or(Position::new(end, end));
+        Ok(Node::HtmlComment(Box::new(HtmlComment {
+            id: ID0,
+            position: Position::new(block_start_position.start, block_end_position.end),
+            body: js::trim(js::slice(source, block_start_position.end, block_end_position.start)),
+            children: filter_children(ChildFilterMode::Syntactic, children, source),
+            block_start_position,
+            block_end_position,
         })))
     }
 
