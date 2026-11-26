@@ -340,7 +340,7 @@ pub struct MockDependencies<'a> {
 }
 
 impl<'a> MockDependencies<'a> {
-    fn new(theme: &'a Theme<'a>, mode: Mode, record_theme: &Object, recorded: &'a Value) -> Self {
+    pub(crate) fn new(theme: &'a Theme<'a>, mode: Mode, record_theme: &Object, recorded: &'a Value) -> Self {
         let fs = match recorded.get("fs").filter(|f| f.is_truthy()) {
             Some(f) => MockFileSystem::new(
                 f.get("theme").and_then(Value::as_object).cloned().unwrap_or_default(),

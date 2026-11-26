@@ -17,6 +17,7 @@ pub mod disabled_checks;
 pub mod fixes;
 pub mod fs;
 pub mod golden;
+pub mod upstream_specs;
 pub mod graph;
 pub mod liquid_doc;
 pub mod registry;
