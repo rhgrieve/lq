@@ -43,6 +43,7 @@ divergences! {
     UnclosedHtmlIdentifier: "UnclosedHTMLElement", "Condition names print `a['b']['c']`, not `a['b'],['c']`.";
     HtmlSyntaxQuotedLiteral: "LiquidHTMLSyntaxError", "A quoted literal may contain the other kind of quote.";
     LiquidSyntaxUnclosedLine: "LiquidSyntaxError", "An unclosed `block` or `partial` in `{% liquid %}` is reported on its statement.";
+    LiquidSyntaxPrototypeTag: "LiquidSyntaxError", "A tag named like an `Object.prototype` member is checked as any other tag.";
     ContentForPrototype: "ValidContentForArguments", "A `content_for` type named like an `Object.prototype` member doesn't stop the check.";
     AddArgumentSuggestion: "Missing*Arguments", "The add-argument suggestion emits no double comma and no empty value.";
     PresetsBlockOrderPath: "SchemaPresetsBlockOrder", "The AST path is restored after recursing into nested blocks.";

@@ -112,6 +112,14 @@ const CASES = [
     fixed: exactly(['LiquidSyntaxError'], [['LiquidSyntaxError', '1:2-1:13', "Unclosed block tag 'partial' in {% liquid %} block"]]),
   },
   {
+    id: 'LiquidSyntaxPrototypeTag',
+    name: 'a tag named hasOwnProperty stops the check for the file',
+    checks: ['LiquidSyntaxError'],
+    files: { 'snippets/a.liquid': "{% hasOwnProperty %}\n{% assign x = 1 2 %}\n" },
+    upstream: exactly(['LiquidSyntaxError'], []),
+    fixed: exactly(['LiquidSyntaxError'], [['LiquidSyntaxError', '1:0-1:20', "Syntax error in 'assign' tag"]]),
+  },
+  {
     id: 'ContentForPrototype',
     name: '__proto__ stops the check for the file',
     checks: ['ValidContentForArguments'],

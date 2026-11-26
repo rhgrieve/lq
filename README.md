@@ -278,15 +278,17 @@ Filters and tags lq doesn't model are listed with the report.
 
 The claim, exactly:
 
-- **Pinned versions.** `@shopify/theme-check-node` 3.31.0 with `theme-check-common` and `theme-graph` 3.31.0,
-  `@shopify/liquid-html-parser` 2.11.0, `@shopify/prettier-plugin-liquid` 1.11.3 and Prettier 3.9.10. Docs and JSON
-  schemas are a snapshot of `theme-liquid-docs` in `data/docs`.
-- **Lint.** All 91 check definitions are implemented. `lq check --upstream-bugs`, with all checks on, has zero
-  differences from upstream's `themeCheckRun` on the offense *set* (file, check, severity, range, message) on three
-  real themes: Dawn (`3e9ee22`), Horizon (`9960490`) and a private production theme. Set `LQ_EXTRA_THEME=<dir>` to add
-  a theme of your own to every harness.
-- **Specs.** 5093 of 5098 records from upstream's own spec suite replay identically, including fixes and suggestions.
-  The other 5 can't be replayed, because they mock the remote asset size request. None fail.
+- **Pinned versions.** `lq check` follows Shopify/theme-tools `main` at `af2e1a7`, which is past the
+  `@shopify/theme-check-node` 4.0.2 release: `theme-check-common`, `theme-check-node`, `theme-graph` and
+  `liquid-html-parser` as of that commit. `lq fmt` follows `@shopify/prettier-plugin-liquid` 1.11.3 with
+  `@shopify/liquid-html-parser` 2.11.0, as editors run it, and Prettier 3.9.10. Docs and JSON schemas are a snapshot of
+  `theme-liquid-docs` in `data/docs`.
+- **Lint.** All 98 check definitions are implemented. `lq check --upstream-bugs`, with all checks on, has zero
+  differences from upstream's `themeCheckRun` on the offense *set* (file, check, severity, range, message) on Dawn
+  (`3e9ee22`) and Horizon (`9960490`). Set `LQ_EXTRA_THEME=<dir>` to add a theme of your own to every harness.
+- **Specs.** All 1911 cases of upstream's language-neutral check specs pass in `--upstream-bugs` mode, fixes and
+  suggestions included, and so do all 24 graph specs and all 551 parser specs. They're copied into `specs/upstream`
+  and run by `cargo test`.
 - **Formatter.** With embedded formatting off, output is byte-identical to Prettier on the same themes, including
   badly formatted variants of them, at widths 100, 80 and 40. On upstream's fixtures, 887 of 888 cases match with
   embedded formatting on, the other being the Markdown block below. JSON blocks go through a native port and are
@@ -299,13 +301,22 @@ fixtures. A difference found on other code is a bug worth reporting.
 
 ### Running the harnesses
 
-The harnesses compare against the real upstream, installed by hand in the gitignored `reference/`:
+The harnesses compare against the real upstream, installed by hand in the gitignored `reference/`. The formatter's
+oracle is the npm release; the checker's is built from theme-tools `main` at the pinned commit:
 
 ```sh
 mkdir -p reference/oracle && cd reference/oracle
 npm install @shopify/theme-check-node@3.31.0 @shopify/prettier-plugin-liquid@1.11.3 prettier@3.9.10
 cd ../.. && git clone --depth 1 --branch @shopify/theme-check-node@3.31.0 https://github.com/Shopify/theme-tools reference/theme-tools
-git clone --depth 1 https://github.com/Shopify/dawn reference/corpus/dawn
+git clone https://github.com/Shopify/theme-tools reference/theme-tools-main
+git -C reference/theme-tools-main checkout af2e1a784a1f9a454beececb9a987a8271c02d57
+(cd reference/theme-tools-main && pnpm install --frozen-lockfile --filter "@shopify/theme-check-node..." \
+  && pnpm --filter "@shopify/theme-check-node..." build)
+mkdir -p reference/oracle-main && cd reference/oracle-main && npm init -y
+for p in liquid-html-parser theme-check-common theme-graph theme-check-docs-updater theme-check-node; do
+  (cd ../theme-tools-main/packages/$p && pnpm pack --pack-destination ../../../oracle-main/tarballs); done
+npm install tarballs/*.tgz yaml
+cd ../.. && git clone --depth 1 https://github.com/Shopify/dawn reference/corpus/dawn
 git clone --depth 1 https://github.com/Shopify/horizon reference/corpus/horizon
 ```
 
@@ -313,8 +324,8 @@ Then, with `cargo build --release --workspace`:
 
 | Harness | Compares |
 |---|---|
-| `cargo test --workspace` | unit tests, and the spec goldens in `--upstream-bugs` mode |
-| `node scripts/parity/goldens.mjs` | the spec goldens, per check |
+| `cargo test --workspace` | unit tests, and upstream's check and graph specs in `--upstream-bugs` mode |
+| `node scripts/parity/specs-parser.mjs specs/upstream` | upstream's parser specs, against `lq debug-ast --parser check` |
 | `node scripts/parity/lint.mjs` | `lq check --upstream-bugs` with upstream, on the three themes |
 | `node scripts/parity/lint.mjs --default-mode` | the default with upstream: every difference must have a divergence |
 | `node scripts/parity/divergences.mjs` | each divergence: upstream's behaviour, `--upstream-bugs`, and the fix |
@@ -425,12 +436,15 @@ To build a tarball locally for this machine only, put the binary at `<vendor>/<p
 
 ## Re-pinning to a new upstream release
 
-1. Reinstall `reference/oracle` and re-clone `reference/theme-tools` at the new versions.
+1. For the checker, rebuild `reference/oracle-main` and `reference/theme-tools-main` at the new commit, and copy its
+   `specs/` over `specs/upstream`. For the formatter, reinstall `reference/oracle` and re-clone `reference/theme-tools`
+   at the new release.
 2. Update `data/docs` from `theme-liquid-docs`, and `NOTICE.md` and `THEME_CHECK_VERSION` in
    `crates/lq-cli/src/check_cmd.rs`.
 3. `node scripts/parity/gen-registry.mjs` regenerates the check registry and `reference/gen/registry.json`. New checks
    come up as not implemented; `crates/lq-check/PORTING.md` is the guide to porting one.
-4. `scripts/parity/record-goldens.sh` re-records the specs into `tests/goldens/`.
+4. Update the commit in `NOTICE.md`, `DIVERGENCES.md`, `UPSTREAM_TAG` in `.github/workflows/release.yml` and the
+   `--version` strings in `crates/lq-cli`.
 5. Diff upstream between the tags, port what changed, and run every harness above until they're at zero.
 6. For each entry in `DIVERGENCES.md`, run `divergences.mjs`: a case failing on "upstream isn't the reported behaviour"
    means upstream changed. If upstream fixed it, remove the variant and its branches.

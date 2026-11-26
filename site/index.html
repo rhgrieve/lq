@@ -78,10 +78,10 @@
     <section class="wrap" aria-labelledby="compat-h">
       <h2 id="compat-h">Compatibility</h2>
       <ul class="facts">
-        <li><strong>All 91 checks.</strong> On Dawn, Horizon and a production theme, it reports the same offenses as <code>theme check</code> 3.31.0.</li>
+        <li><strong>All 98 checks.</strong> On Dawn and Horizon it reports the same offenses as <code>theme check</code> from theme-tools <code>main</code> (past 4.0.2), and it passes all 1911 of upstream&rsquo;s check specs.</li>
         <li><strong>Same formatting as Prettier.</strong> Liquid and HTML output is byte-identical to <code>prettier-plugin-liquid</code> 1.11.3. Embedded JS and CSS go through Biome, which can differ in some cases.</li>
         <li><strong>Same JSON.</strong> <code>lq check --output json</code> matches upstream byte for byte, so existing tooling keeps working.</li>
-        <li><strong>Upstream bugs fixed.</strong> 20 known bugs, each listed with a reproduction in <a href="https://github.com/rhgrieve/lq/blob/main/DIVERGENCES.md">DIVERGENCES.md</a>. <code>--upstream-bugs</code> turns them back on.</li>
+        <li><strong>Upstream bugs fixed.</strong> 18 known bugs, each listed with a reproduction in <a href="https://github.com/rhgrieve/lq/blob/main/DIVERGENCES.md">DIVERGENCES.md</a>. <code>--upstream-bugs</code> turns them back on.</li>
         <li><strong>Reads your config.</strong> <code>.theme-check.yml</code>, <code>.prettierrc</code> and ignore files work as they do today.</li>
       </ul>
     </section>

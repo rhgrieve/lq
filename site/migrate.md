@@ -3,8 +3,8 @@
 Instructions for a coding agent moving a theme repository from `shopify theme check` and Prettier
 to lq. Work through the steps in order, verify, then report back to the user.
 
-lq is a Rust port of `shopify theme check` (theme-check 3.31.0) and `@shopify/prettier-plugin-liquid`
-(1.11.3). It reads the same config files and produces the same results, except where listed in
+lq is a Rust port of `shopify theme check` (theme-check 4.0.2 plus the unreleased changes on theme-tools `main` up to
+`af2e1a7`) and `@shopify/prettier-plugin-liquid` (1.11.3). It reads the same config files and produces the same results, except where listed in
 [DIVERGENCES.md](https://github.com/rhgrieve/lq/blob/main/DIVERGENCES.md) and the
 [known gaps](https://github.com/rhgrieve/lq#known-gaps). It is not affiliated with Shopify.
 

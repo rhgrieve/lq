@@ -130,6 +130,17 @@ fn check_raw_tag_node(tag: &LiquidRawTag<'_>, cx: &LiquidCx<'_, '_>) {
 
 impl LiquidSyntaxError {
     fn check_tag(&mut self, tag: &LiquidTag<'_>, cx: &LiquidCx<'_, '_>) {
+        // `tagCheckers[node.name] ?? misplacedTagCheckers[node.name]` finds `Object.prototype`
+        // members, which main's parser now accepts as tag names (a73b174f), and calls them as
+        // checkers: most throw, and the rest skip the base check.
+        if !cx.divergence(Divergence::LiquidSyntaxPrototypeTag) {
+            if let Some(result) = prototype_tag_checker(tag.name) {
+                if let Err(message) = result {
+                    cx.fail(super::shared_schema::type_error(message));
+                }
+                return;
+            }
+        }
         let source = cx.source();
         let p = tag.position;
         let raw = slice(source, tag.markup_position.start, tag.markup_position.end);
@@ -1073,4 +1084,18 @@ fn check_javascript_parser_error(error: &ParseError, cx: &LiquidCx<'_, '_>, sour
     if !has_closer {
         report_at(cx, location, "'javascript' tag was never closed");
     }
+}
+
+/// What calling `Object.prototype[name](node, context)` as a tag checker does: `None` when `name`
+/// isn't a member, `Ok` when the call returns, `Err` with the `TypeError` it throws.
+fn prototype_tag_checker(name: &str) -> Option<Result<(), &'static str>> {
+    Some(match name {
+        "constructor" | "toString" => Ok(()),
+        "__defineGetter__" | "__defineSetter__" | "__lookupGetter__" | "__lookupSetter__" | "hasOwnProperty"
+        | "isPrototypeOf" | "propertyIsEnumerable" | "valueOf" => Err("Cannot convert undefined or null to object"),
+        "toLocaleString" => Err("Object.prototype.toLocaleString called on null or undefined"),
+        // `Object.prototype` itself: an object, not a function.
+        "__proto__" => Err("tagCheck is not a function"),
+        _ => return None,
+    })
 }
