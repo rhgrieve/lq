@@ -12,7 +12,7 @@
 //!
 //! Deviations:
 //! - A root with glob magic (`[x]`, `{a,b}`, `*`, `?`, `@(x)`...) is walked through
-//!   this crate's minimatch 10 segments instead of glob's nested minimatch 5.1.9.
+//!   this crate's minimatch 11 segments instead of glob's nested minimatch 5.1.9.
 //!   A root segment that is exactly `**` is treated as a plain directory name.
 //! - Upstream rejects on an unusual `readdir` error such as `EACCES`; here that
 //!   directory is skipped.
