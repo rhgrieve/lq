@@ -332,54 +332,72 @@ fn match_globstar(file: &[&str], pattern: &[Seg], dot: bool) -> bool {
         }
     }
     sections.push(&body[start..]);
-    let file_length = file.len() as isize - tail_match as isize;
-    let mut idx = sections.len();
-    let segs: Vec<(&[Seg], isize)> = sections
-        .iter()
-        .map(|s| {
-            idx -= 1;
-            (*s, file_length - (sums[idx] + s.len()) as isize)
-        })
-        .collect();
-    match_body_sections(file, &segs, file_index, 0, 0, tail_match != 0, dot) == Some(true)
+    // the portions in each section and the ones after it
+    let file_length = file.len() - tail_match;
+    let segs: Vec<(&[Seg], usize)> = sections.iter().zip(&sums).map(|(s, sum)| (*s, non_gs - sum)).collect();
+    let mut tried = vec![false; (segs.len() + 1) * (file.len() + 1)];
+    let mut walk = BodyWalk { file, segs: &segs, file_length, dot, tried: &mut tried };
+    walk.sections(file_index, 0, 0, tail_match != 0) == Some(true)
 }
 
-/// `Some(false)` is "not matching", `None` "not matching, stop trying".
-fn match_body_sections(
-    file: &[&str],
-    segs: &[(&[Seg], isize)],
-    mut file_index: usize,
-    body_index: usize,
-    depth: usize,
-    mut saw_tail: bool,
+/// The arguments of `#matchGlobStarBodySections` that stay the same in a walk.
+struct BodyWalk<'a> {
+    file: &'a [&'a str],
+    /// Each section, and the portions that it and the sections after it need.
+    segs: &'a [(&'a [Seg], usize)],
+    /// The end of the file portions that the body can match.
+    file_length: usize,
     dot: bool,
-) -> Option<bool> {
-    let Some((body, after)) = segs.get(body_index) else {
-        let mut i = file_index;
-        while i < file.len() {
-            saw_tail = true;
-            if is_dot_part(file[i], dot) {
+    /// The places that a walk has already tried, as
+    /// `body_index * (file.len() + 1) + file_index`. A walk from a place does the
+    /// same no matter how it got there, and it only comes back if it found no
+    /// match, so a walk that gets to one stops.
+    tried: &'a mut [bool],
+}
+
+impl BodyWalk<'_> {
+    /// `#matchGlobStarBodySections`: `Some(false)` is "not matching", `None` "not
+    /// matching, stop trying".
+    fn sections(&mut self, mut file_index: usize, body_index: usize, depth: usize, mut saw_tail: bool) -> Option<bool> {
+        let file = self.file;
+        let Some(&(body, need)) = self.segs.get(body_index) else {
+            // just make sure that there's no bad dots before the tail
+            for f in &file[file_index.min(self.file_length)..self.file_length] {
+                saw_tail = true;
+                if is_dot_part(f, self.dot) {
+                    return Some(false);
+                }
+            }
+            return Some(saw_tail);
+        };
+        // the last index where the section can start
+        let after = self.file_length.checked_sub(need)?;
+        while file_index <= after {
+            let key = body_index * (file.len() + 1) + file_index;
+            if self.tried[key] {
                 return Some(false);
             }
-            i += 1;
-        }
-        return Some(saw_tail);
-    };
-    while file_index as isize <= *after {
-        let end = (file_index + body.len()).min(file.len());
-        let m = match_one(&file[..end], body, file_index, 0);
-        if m && depth < 200 {
-            let sub = match_body_sections(file, segs, file_index + body.len(), body_index + 1, depth + 1, saw_tail, dot);
-            if sub != Some(false) {
-                return sub;
+            self.tried[key] = true;
+            let end = (file_index + body.len()).min(file.len());
+            let m = match_one(&file[..end], body, file_index, 0);
+            // if limit exceeded, no match: upstream's intentional false negative
+            if m && depth < 200 {
+                let sub = self.sections(file_index + body.len(), body_index + 1, depth + 1, saw_tail);
+                if sub != Some(false) {
+                    return sub;
+                }
             }
+            // the ** does not walk past the last place the body can start
+            if file_index == after {
+                break;
+            }
+            if is_dot_part(file[file_index], self.dot) {
+                return Some(false);
+            }
+            file_index += 1;
         }
-        if file_index < file.len() && is_dot_part(file[file_index], dot) {
-            return Some(false);
-        }
-        file_index += 1;
+        None
     }
-    None
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,6 +1698,17 @@ mod tests {
         assert!(minimatch("\\a", "\\\\{a,b}"));
         assert!(!minimatch("a", "\\\\{a,b}"));
         assert!(!minimatch("a\\x", "{a,b}\\\\\\*"));
+    }
+
+    // The ** before a body section can walk up to where the section and the ones
+    // after it still fit, and the dot check stops before the tail.
+    #[test]
+    fn globstar_body_sections() {
+        assert!(minimatch("a/b/c/d", "**/a/b/**/c/**/d"));
+        assert!(minimatch("x/q/a/b/c/d/e", "x/**/a/b/c/**/d/**/e"));
+        assert!(minimatch("a/.x", "**/a/**/.x"));
+        assert!(minimatch("x/q/.y/z", "**/x/**/.y/z"));
+        assert!(!minimatch("a/.q/b/c", "a/**/b/**/c"));
     }
 
     #[test]
