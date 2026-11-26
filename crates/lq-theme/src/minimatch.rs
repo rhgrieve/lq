@@ -419,7 +419,11 @@ pub fn brace_expand(pattern: &str) -> Vec<String> {
     if !has_brace_set(pattern) {
         return vec![pattern.to_string()];
     }
-    expand(pattern)
+    // brace-expansion turns each escaped backslash `\\` into a single `\`, which
+    // then escapes the next character instead, and can turn an escaped magic
+    // character (`\\\*`) into a live one. Doubling every pair brings an escaped
+    // backslash back out still escaped.
+    expand(&pattern.replace("\\\\", "\\\\\\\\"))
 }
 
 fn expand(s: &str) -> Vec<String> {
@@ -1667,6 +1671,15 @@ mod tests {
         assert!(minimatch("foo.bar", "foo.@(bar|baz)"));
         assert!(!minimatch("foo.qux", "foo.@(bar|baz)"));
         assert!(minimatch("foo.qux", "foo.!(bar|baz)"));
+    }
+
+    // An escaped backslash before a brace set stays escaped.
+    #[test]
+    fn escaped_backslash_braces() {
+        assert_eq!(brace_expand("\\\\{a,b}"), ["\\\\a", "\\\\b"]);
+        assert!(minimatch("\\a", "\\\\{a,b}"));
+        assert!(!minimatch("a", "\\\\{a,b}"));
+        assert!(!minimatch("a\\x", "{a,b}\\\\\\*"));
     }
 
     #[test]
