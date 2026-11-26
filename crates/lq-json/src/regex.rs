@@ -45,7 +45,6 @@ enum UnicodeProp {
     Letter,
     Number,
     Punctuation,
-    Symbol,
     Separator,
     Control,
     Lowercase,
@@ -356,7 +355,7 @@ impl Parser<'_> {
             "Letter" | "Alphabetic" => UnicodeProp::Letter,
             "N" | "Number" => UnicodeProp::Number,
             "Punctuation" => UnicodeProp::Punctuation,
-            "S" | "Symbol" => UnicodeProp::Symbol,
+            "S" | "Symbol" => UnicodeProp::Table(tables::S),
             "Separator" => UnicodeProp::Separator,
             "Control" => UnicodeProp::Control,
             "Lowercase" => UnicodeProp::Lowercase,
@@ -489,7 +488,6 @@ fn prop_matches(p: UnicodeProp, c: char) -> bool {
         UnicodeProp::Punctuation => {
             c.is_ascii_punctuation() && !matches!(c, '$' | '+' | '<' | '=' | '>' | '^' | '`' | '|' | '~')
         }
-        UnicodeProp::Symbol => matches!(c, '$' | '+' | '<' | '=' | '>' | '^' | '`' | '|' | '~'),
         UnicodeProp::Separator => c == ' ' || (c != '\u{FEFF}' && !c.is_ascii() && is_js_whitespace(c)),
         UnicodeProp::Control => c.is_control(),
         UnicodeProp::Lowercase => c.is_lowercase(),
@@ -831,6 +829,16 @@ mod tests {
         assert!(t(".*_html$", "foo_html"));
         assert!(!t(".*_html$", "foo_html\n"));
         assert!(!t("^[0-9]+$", ""));
+    }
+
+    #[test]
+    fn symbol_category() {
+        // `\p{S}` is the whole general category, as minimatch 11's `[[:punct:]]` needs.
+        for c in ["$", "+", "^", "\u{a9}", "\u{20ac}", "\u{2190}", "\u{1f600}"] {
+            assert!(t("^\\p{S}$", c), "{c}");
+        }
+        assert!(!t("^\\p{S}$", "a"));
+        assert!(!t("^\\p{S}$", "!"));
     }
 
     #[test]
