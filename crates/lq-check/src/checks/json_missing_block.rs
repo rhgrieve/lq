@@ -63,22 +63,57 @@ fn is_nested_block(path: &[String], structural: bool) -> bool {
 }
 
 impl<'t, 'a: 't, 'f> Walk<'t, 'a, 'f> {
-    /// `getThemeBlocks(sectionType, currentPath, context)`. `Err` is a throw.
-    fn theme_blocks(&self, section_type: Option<&'t Value>, path: &[String]) -> Js<Vec<Option<&'t Value>>> {
-        let mut out = Vec::new();
-        let Some(name) = section_type.filter(|t| t.is_truthy()) else { return Ok(out) };
-        let Some(name) = name.as_str() else { return Ok(out) };
+    /// `getAllowedBlocks(sectionType, currentPath, context)`: the host's `blocks`, or `None` when
+    /// its schema is missing or invalid, which other checks report (theme-tools 0dcea3cd).
+    fn allowed_blocks(&self, section_type: Option<&'t Value>, path: &[String]) -> Option<&'t [Value]> {
+        let name = section_type.and_then(Value::as_str).filter(|n| !n.is_empty())?;
         let schema = if is_nested_block(path, self.cx.divergence(Divergence::NestedBlockPath)) { self.cx.block_schema(name) } else { self.cx.section_schema(name) };
-        let Some(schema) = schema else { return Ok(out) };
-        let Some(valid) = schema.valid_value() else { return Ok(out) };
-        if let Some(Value::Array(blocks)) = valid.get("blocks") {
-            for block in blocks {
-                if !in_op(block, "name")? && block.get("type").and_then(Value::as_str) != Some("@app") {
-                    out.push(block.get("type"));
+        let valid = schema?.valid_value()?;
+        Some(match valid.get("blocks") {
+            Some(Value::Array(blocks)) => blocks,
+            _ => &[],
+        })
+    }
+
+    /// The part of `validateBlock` before the file lookup: `Ok(Some(themeBlocks))` when it goes
+    /// on to look the block's file up, `Ok(None)` when it's done. `Err` is a throw (`in` on a
+    /// primitive in `blocks`).
+    fn pre_validate(&self, block_type: &str, node: &'t JsonNode<'a>, ancestor: Option<&'t Value>, path: &[String], allowed: &'t [Value]) -> Js<Option<Vec<Option<&'t Value>>>> {
+        let location = if is_nested_block(path, self.cx.divergence(Divergence::NestedBlockPath)) { "blocks" } else { "sections" };
+        let ty_is = |block: &Value, t: &str| block.get("type").and_then(Value::as_str) == Some(t);
+        // App blocks are remote references and need permission from their immediate host.
+        if block_type.starts_with("shopify://apps/") {
+            let mut app_allowed = false;
+            for block in allowed {
+                if !in_op(block, "name")? && ty_is(block, "@app") {
+                    app_allowed = true;
+                    break;
                 }
             }
+            if !app_allowed {
+                let loc = node.loc();
+                let ancestor = js_string(ancestor);
+                self.cx.report(JsonProblem::new(
+                    format!("Block type '{block_type}' is not allowed in '{location}/{ancestor}.liquid'."),
+                    loc.start,
+                    loc.end,
+                ));
+            }
+            return Ok(None);
         }
-        Ok(out)
+        // Section blocks don't need a file in blocks/.
+        for block in allowed {
+            if in_op(block, "name")? && ty_is(block, block_type) {
+                return Ok(None);
+            }
+        }
+        let mut themes = Vec::new();
+        for block in allowed {
+            if !in_op(block, "name")? && !ty_is(block, "@app") {
+                themes.push(block.get("type"));
+            }
+        }
+        Ok((!themes.is_empty()).then_some(themes))
     }
 
     fn validate_block_result(&self, ty: &'t Value, is_static: bool, node: &'t JsonNode<'a>, ancestor: Option<&'t Value>, path: &[String], themes: &[Option<&'t Value>]) -> Js<()> {
@@ -127,15 +162,23 @@ impl<'t, 'a: 't, 'f> Walk<'t, 'a, 'f> {
                     }
                 }
             };
-            match (ty.filter(|t| t.is_truthy()), node) {
+            // `typeof block.type === 'string' && block.type`
+            match (ty.filter(|t| t.as_str().is_some_and(|t| !t.is_empty())), node) {
                 (Some(ty), Some(node)) => {
                     let current = path.clone();
                     s.after(SCHEMA_TICKS, move |s| {
-                        let Ok(themes) = self.theme_blocks(ancestor, &current) else { return };
-                        if themes.is_empty() {
+                        let Some(allowed) = self.allowed_blocks(ancestor, &current) else {
                             s.after(RETURN_TICKS, then);
                             return;
-                        }
+                        };
+                        let themes = match self.pre_validate(ty.as_str().unwrap_or(""), node, ancestor, &current, allowed) {
+                            Err(_) => return,
+                            Ok(None) => {
+                                s.after(RETURN_TICKS, then);
+                                return;
+                            }
+                            Ok(Some(themes)) => themes,
+                        };
                         let finish = move |s: &mut Sched<'t>| {
                             let is_static = block.get("static").is_some_and(Value::is_truthy);
                             if self.validate_block_result(ty, is_static, node, ancestor, &current, &themes).is_ok() {

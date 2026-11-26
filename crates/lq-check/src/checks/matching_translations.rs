@@ -19,8 +19,14 @@ fn create<'a, 'f>(cx: &JsonCx<'a, 'f>) -> Option<Box<dyn JsonCheck<'a> + 'a>> {
     let is_locale_file = cx.to_relative_path(uri).starts_with("locales/");
     let is_default = uri.ends_with(".default.json") || uri.ends_with(".default.schema.json");
     let Ok(ast) = cx.file().json_ast() else { return None };
-    if !is_locale_file || is_default {
+    if !is_locale_file {
         return None;
+    }
+    if is_default {
+        // The storefront raises when a count has no matching plural key and no `other` to fall
+        // back to, so every pluralized entry of a default translations file needs `other`
+        // (theme-tools 31551e4e). Default schema translations aren't checked.
+        return if uri.ends_with(".schema.json") { None } else { Some(Box::new(DefaultPlurals)) };
     }
     Some(Box::new(MatchingTranslations {
         ast,
@@ -191,5 +197,36 @@ impl<'a> JsonCheck<'a> for MatchingTranslations<'a> {
                     .fix(|c| c.add(path.clone(), Value::String("TODO".into()))),
             );
         }
+    }
+}
+
+/// The default translations file's check: pluralized entries without `other`.
+struct DefaultPlurals;
+
+impl<'a> JsonCheck<'a> for DefaultPlurals {
+    fn enter(&mut self, node: &'a JsonNode<'a>, ancestors: &[&'a JsonNode<'a>], cx: &JsonCx<'a, '_>) {
+        let JsonNode::Property { value, loc, .. } = node else { return };
+        let JsonNode::Object { children, .. } = &**value else { return };
+        if children.is_empty() || ancestors.iter().any(|a| matches!(a, JsonNode::Array { .. })) {
+            return;
+        }
+        let plural_string = |child: &JsonNode<'_>| {
+            child.property_key().is_some_and(|k| PLURALIZATION_KEYS.contains(&k))
+                && matches!(child, JsonNode::Property { value, .. } if matches!(**value, JsonNode::Literal { value: Literal::String(_), .. }))
+        };
+        if !children.iter().all(plural_string) || children.iter().any(|c| c.property_key() == Some("other")) {
+            return;
+        }
+        // `objectPath(ancestors.concat(node))`
+        let path: Vec<&str> = ancestors.iter().chain(std::iter::once(&node)).filter_map(|n| n.property_key()).collect();
+        let path = path.join(".");
+        if is_external_path(&path) || path == "shopify" || path == "customer_accounts" {
+            return;
+        }
+        cx.report(JsonProblem::new(
+            format!("The pluralized translation '{path}' is missing the 'other' key"),
+            loc.start,
+            loc.end,
+        ));
     }
 }

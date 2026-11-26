@@ -465,9 +465,41 @@ impl<'a, 'f, C> Cx<'a, 'f, C> {
         self.run.deps.fs().stat(uri).map_or(0, |s| s.size)
     }
 
+    /// `context.remoteFileSize(url)`.
+    pub fn remote_file_size(&self, url: &str) -> u64 {
+        self.run.deps.remote_file_size(url)
+    }
+
     /// `doesFileExist(context, relativePath)`.
     pub fn does_file_exist(&self, relative_path: &str) -> bool {
-        self.file_exists(&self.to_uri(relative_path))
+        self.is_in_theme_directory(relative_path) && self.file_exists(&self.to_uri(relative_path))
+    }
+
+    /// `isInThemeDirectory(context, relativePath)`: whether `relative_path` stays in the theme
+    /// directory its first segment names, as the file system reads it. `to_uri` resolves `..`,
+    /// and a file system decodes the URI once more, where `%2e%2e%2f` is `../` (theme-tools
+    /// f8e75c0b).
+    pub fn is_in_theme_directory(&self, relative_path: &str) -> bool {
+        let directory = relative_path.split_once('/').map_or("", |(d, _)| d);
+        let mut directory_path = lq_json::uri::file_system_path(&self.to_uri(directory));
+        if !directory_path.ends_with('/') {
+            directory_path.push('/');
+        }
+        lq_json::uri::file_system_path(&self.to_uri(relative_path)).starts_with(&directory_path)
+    }
+
+    /// `isAssetFileName(context, fileName)`: whether `file_name` names a file directly in the
+    /// theme's assets directory, both as written and as the file system reads it.
+    pub fn is_asset_file_name(&self, file_name: &str) -> bool {
+        let separator = |s: &str| s.contains(['/', '\\']);
+        let u = self.to_uri(&format!("assets/{file_name}"));
+        let base = lq_json::uri::basename(&u, None);
+        !separator(file_name)
+            && !separator(&base)
+            && base != "."
+            && base != ".."
+            // Both normalized: `to_uri` may spell the root `file:/`, `dirname` `file:///`.
+            && lq_json::uri::normalize(&lq_json::uri::dirname(&u)) == lq_json::uri::normalize(&self.to_uri("assets"))
     }
 
     /// `context.fs`.

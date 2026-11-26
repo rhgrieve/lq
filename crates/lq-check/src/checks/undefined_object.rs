@@ -158,6 +158,9 @@ impl<'a> LiquidCheck<'a> for UndefinedObject<'a> {
                 if matches!(ancestors.last(), Some(Node::LiquidTag(t)) if t.name == "capture") {
                     return;
                 }
+                if is_for_offset_continue(lookup, ancestors) {
+                    return;
+                }
                 if let Some(name) = lookup.name.filter(|n| !n.is_empty()) {
                     self.variables.push((name, node.position()));
                 }
@@ -171,12 +174,20 @@ impl<'a> LiquidCheck<'a> for UndefinedObject<'a> {
             return;
         }
         let Some(docset) = cx.docset() else { return };
-        let contextual = self.contextual;
+        // A snippet also sees the contextual objects of the files that render it, directly or
+        // through other files (theme-tools 7eea77c5). Unreadable references count as none.
+        let relative_path = cx.to_relative_path(cx.uri());
+        let mut contextual: HashSet<&str> = self.contextual.iter().copied().collect();
+        if relative_path.starts_with("snippets/") && cx.has_references() {
+            for u in crate::utils::traversal::ancestor_uris(cx.uri(), &|u| cx.references(u)) {
+                contextual.extend(contextual_objects(&cx.to_relative_path(&u), cx.mode()).iter().copied());
+            }
+        }
         let globals: HashSet<&str> = docset
             .objects()
             .iter()
             .filter(|o| {
-                contextual.contains(&o.name)
+                contextual.contains(o.name)
                     || match &o.access {
                         None => true,
                         Some(access) => access.global || !access.template.is_empty(),
@@ -205,4 +216,17 @@ impl<'a> LiquidCheck<'a> for UndefinedObject<'a> {
             }
         }
     }
+}
+
+/// `isForOffsetContinue(node, ancestors)`: in `{% for x in y offset: continue %}`, `continue` is a
+/// keyword that resumes where the last loop over the same collection stopped, not a variable.
+/// Only `for` supports it, not `tablerow` (theme-tools 9f110b3f).
+fn is_for_offset_continue(lookup: &lq_syntax::ast::LiquidVariableLookup<'_>, ancestors: &[&Node<'_>]) -> bool {
+    if lookup.name != Some("continue") || !lookup.lookups.is_empty() {
+        return false;
+    }
+    let [.., tag, markup, argument] = ancestors else { return false };
+    matches!(argument, Node::NamedArgument(a) if a.name == "offset")
+        && matches!(markup, Node::ForMarkup(_))
+        && matches!(tag, Node::LiquidTag(t) if t.name == "for")
 }

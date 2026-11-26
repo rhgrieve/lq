@@ -39,22 +39,22 @@ const HARDCODED_ROUTES: [(&str, &str); 18] = [
     ("/", "root_url"),
 ];
 
-/// `value.startsWith(route)`. With `bounded` ([`Divergence::RouteBoundary`]) the route must
-/// end at a segment boundary, so `/cartoons` isn't `/cart`.
-fn route_prefix(value: &str, route: &str, bounded: bool) -> bool {
+/// `startsWithRoute(value, route)`: matches /cart, /cart/, /cart?..., /cart#... and /cart.js, but
+/// not /cartography.
+fn route_prefix(value: &str, route: &str) -> bool {
     match value.strip_prefix(route) {
         None => false,
-        Some(rest) => !bounded || rest.is_empty() || matches!(rest.as_bytes()[0], b'/' | b'?' | b'#'),
+        Some(rest) => rest.is_empty() || matches!(rest.as_bytes()[0], b'/' | b'?' | b'#' | b'.'),
     }
 }
 
-fn hardcoded_route(attr: &AttrNode<'_>, bounded: bool) -> Option<(&'static str, &'static str)> {
+fn hardcoded_route(attr: &AttrNode<'_>) -> Option<(&'static str, &'static str)> {
     let Some(Node::TextNode(text)) = attr.value.first() else { return None };
     HARDCODED_ROUTES.iter().copied().find(|(route, _)| {
         if *route == "/" {
             text.value == "/" && attr.value.len() == 1
         } else {
-            route_prefix(&text.value, route, bounded)
+            route_prefix(&text.value, route)
         }
     })
 }
@@ -71,13 +71,12 @@ impl<'a> LiquidCheck<'a> for HardcodedRoutes {
     fn enter(&mut self, node: &'a Node<'a>, _ancestors: &[&'a Node<'a>], cx: &LiquidCx<'a, '_>) {
         match node {
             Node::HtmlElement(element) => {
-                let bounded = cx.divergence(Divergence::RouteBoundary);
                 let found = element.attributes.iter().find_map(|a| {
                     let valued = valued_attribute(a)?;
                     if !is_attr(a, "action") && !is_attr(a, "href") {
                         return None;
                     }
-                    Some((hardcoded_route(valued, bounded)?, valued.attribute_position.start))
+                    Some((hardcoded_route(valued)?, valued.attribute_position.start))
                 });
                 if let Some((route, start)) = found {
                     report(cx, route, start);
@@ -95,12 +94,11 @@ impl<'a> LiquidCheck<'a> for HardcodedRoutes {
                     Node::String(s) => s.value,
                     _ => "",
                 };
-                let bounded = cx.divergence(Divergence::RouteBoundary);
                 let route = HARDCODED_ROUTES.iter().copied().find(|(route, _)| {
                     if *route == "/" {
                         value == "/"
                     } else {
-                        route_prefix(value, route, bounded)
+                        route_prefix(value, route)
                     }
                 });
                 if let Some(route) = route {

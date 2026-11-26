@@ -9,6 +9,10 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 export const ORACLE = path.join(ROOT, 'reference/oracle');
 export const GEN = path.join(ROOT, 'reference/gen');
 export const oracleRequire = createRequire(path.join(ORACLE, 'package.json'));
+// `lq check` targets theme-tools main at a pinned commit, built into its own oracle; `lq fmt` keeps
+// the released Prettier plugin and parser in ORACLE. See `reference/README.md` for both setups.
+export const CHECK_ORACLE = path.join(ROOT, 'reference/oracle-main');
+export const checkOracleRequire = createRequire(path.join(CHECK_ORACLE, 'package.json'));
 // LQ_EXTRA_THEME adds a theme of your own, such as a private one, to every harness as `extra`.
 export const THEMES = {
   ...(process.env.LQ_EXTRA_THEME ? { extra: path.resolve(process.env.LQ_EXTRA_THEME) } : {}),

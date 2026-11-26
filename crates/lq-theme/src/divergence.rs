@@ -39,7 +39,6 @@ macro_rules! divergences {
 }
 
 divergences! {
-    GraphNoType: "theme-graph", "Contextual templates and section groups are traversed as theme-graph 0.3.10 does, instead of failing the whole graph.";
     GraphFailure: "OrphanedSnippet, ValidScopedCSSClass", "Graph-based conclusions are not drawn when the graph failed to build.";
     UnclosedHtmlIdentifier: "UnclosedHTMLElement", "Condition names print `a['b']['c']`, not `a['b'],['c']`.";
     HtmlSyntaxQuotedLiteral: "LiquidHTMLSyntaxError", "A quoted literal may contain the other kind of quote.";
@@ -55,8 +54,6 @@ divergences! {
     EmptySchema: "TranslationKeyExists, PaginationSize, AssetSizeAppBlock*", "An empty or null `{% schema %}` is no schema.";
     NullInPath: "TranslationKeyExists, PaginationSize", "A null along a translation key or in settings counts as not found.";
     EmptyAssetString: "AssetSizeCSS, AssetSizeJavaScript", "An empty string before `stylesheet_tag` or `script_tag` doesn't stop the check.";
-    CdnPreconnectHost: "CdnPreconnect", "Compares the URL's hostname instead of an unanchored, unescaped pattern.";
-    RouteBoundary: "HardcodedRoutes", "A route matches only up to a segment boundary, `?` or `#`.";
     ImgUrlPrototype: "DeprecatedFilter", "An `img_url` size named like an `Object.prototype` member isn't a named size.";
     AutofixAbort: "engine", "A JSON file that `--auto-correct` can't rewrite, such as a locale with a comment header, is skipped with a warning instead of aborting every other fix.";
 }
@@ -127,7 +124,7 @@ mod tests {
 
     #[test]
     fn only_is_exclusive() {
-        let only = Divergences::only(Divergence::RouteBoundary);
-        assert!(!only.contains(Divergence::GraphNoType));
+        let only = Divergences::only(Divergence::LinkToNoArgument);
+        assert!(!only.contains(Divergence::GraphFailure));
     }
 }

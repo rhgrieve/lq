@@ -7,7 +7,6 @@ use lq_check::to_source_code;
 use lq_json::{uri, Value};
 use lq_theme::config::load_config;
 use lq_theme::discovery::get_theme_files;
-use lq_theme::divergence::Divergences;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -44,15 +43,14 @@ struct Graph {
     entry_points: Vec<String>,
 }
 
-fn build(root: &Path, divergences: Divergences) -> Result<Graph, String> {
+fn build(root: &Path) -> Result<Graph, String> {
     let root = root.to_str().unwrap();
-    let mut config = load_config(None, root, CONFIG_REGISTRY).map_err(|e| e.message)?;
-    config.divergences = divergences;
+    let config = load_config(None, root, CONFIG_REGISTRY).map_err(|e| e.message)?;
     let sources: Vec<(String, String)> =
         get_theme_files(&config).into_iter().map(|p| (uri::file_uri(&p), fs::read_to_string(&p).unwrap())).collect();
     let theme: lq_check::Theme<'_> = sources.iter().map(|(u, s)| to_source_code(u, s)).collect();
     let deps = NodeDependencies::new(&theme, &config, root);
-    let graph = build_theme_graph(&config.root_uri, &deps, &theme, config.context, config.divergences)?;
+    let graph = build_theme_graph(&config.root_uri, &deps, &theme, config.context)?;
     let rel = |u: &str| uri::relative(u, &config.root_uri);
     let mut edges = Vec::new();
     for module in graph.modules.values() {
@@ -111,7 +109,7 @@ fn contextual_templates_and_section_groups() {
     for case in cases {
         let name = str_field(case, "name").unwrap();
         let root = theme(name, case.get("files").unwrap());
-        let graph = build(&root, Divergences::ALL).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let graph = build(&root).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(graph.edges, expected_edges(case), "{name}");
         if let Some(want) = case.get("entryPoints").and_then(Value::as_array) {
             let mut want: Vec<String> = want.iter().map(|v| v.as_str().unwrap().to_string()).collect();
@@ -120,13 +118,4 @@ fn contextual_templates_and_section_groups() {
         }
         fs::remove_dir_all(root).unwrap();
     }
-}
-
-#[test]
-fn upstream_bugs_still_fail_on_an_inherited_type() {
-    let spec = lq_theme::yaml::parse(CONTEXTUAL).unwrap();
-    let case = &spec.get("cases").and_then(Value::as_array).unwrap()[0];
-    let root = theme("upstream-bugs", case.get("files").unwrap());
-    assert!(build(&root, Divergences::NONE).is_err());
-    fs::remove_dir_all(root).unwrap();
 }

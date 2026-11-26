@@ -206,7 +206,9 @@ impl Config {
             self.ignore
                 .iter()
                 .flatten()
-                .map(|p| Minimatch::new(&rewrite_pattern(p, &self.root_uri)))
+                // `minimatch(uri, pattern, { dot: true })`, so that `**` matches when the root is
+                // inside a dot-directory (theme-tools bbd618c8).
+                .map(|p| Minimatch::with_dot(&rewrite_pattern(p, &self.root_uri), true))
                 .collect()
         })
     }
@@ -222,7 +224,9 @@ impl Config {
                 let matchers = list
                     .iter()
                     .filter_map(Value::as_str)
-                    .map(|p| Minimatch::new(&rewrite_pattern(p, &self.root_uri)))
+                    // `minimatch(uri, pattern, { dot: true })`, so that `**` matches when the root is
+                // inside a dot-directory (theme-tools bbd618c8).
+                .map(|p| Minimatch::with_dot(&rewrite_pattern(p, &self.root_uri), true))
                     .collect();
                 map.insert(code.to_string(), matchers);
             }

@@ -3,7 +3,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, THEMES, GEN, oracleRequire, rng } from './lib.mjs';
+import { ROOT, THEMES, GEN, checkOracleRequire, rng } from './lib.mjs';
 
 process.removeAllListeners('warning');
 process.on('warning', () => {});
@@ -14,9 +14,9 @@ const WORK = path.join(GEN, 'config-cases');
 const DIFFS = path.join(GEN, 'config-diffs.txt');
 const REGISTRY = path.join(GEN, 'registry.json');
 
-const common = oracleRequire('@shopify/theme-check-common');
-const node = oracleRequire('@shopify/theme-check-node');
-const YAML = oracleRequire('yaml');
+const common = checkOracleRequire('@shopify/theme-check-common');
+const node = checkOracleRequire('@shopify/theme-check-node');
+const YAML = checkOracleRequire('yaml');
 
 function dumpProp(p) {
   const o = p.options;

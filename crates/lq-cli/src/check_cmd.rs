@@ -898,7 +898,7 @@ pub fn debug_engine(args: &[String]) -> i32 {
         .collect();
     let theme: lq_check::Theme<'_> = sources.iter().map(|(u, s)| lq_check::to_source_code(u, s)).collect();
     let deps = NodeDependencies::new(&theme, &config, &root);
-    let graph = lq_check::graph::build_theme_graph(&config.root_uri, &deps, &theme, config.context, config.divergences);
+    let graph = lq_check::graph::build_theme_graph(&config.root_uri, &deps, &theme, config.context);
     let mut out = Object::new();
     match graph {
         Err(e) => out.insert("graphError", Value::String(e)),

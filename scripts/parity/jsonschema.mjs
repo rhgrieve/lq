@@ -25,11 +25,11 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { GEN, ROOT, THEMES, hash, liquidFiles, oracleRequire, rng, snippet } from './lib.mjs';
+import { GEN, ROOT, THEMES, hash, liquidFiles, checkOracleRequire, rng, snippet } from './lib.mjs';
 
-const { JSONValidator } = oracleRequire('@shopify/theme-check-common');
-const { toLiquidHtmlAST } = oracleRequire('@shopify/liquid-html-parser');
-const jsonc = oracleRequire('jsonc-parser');
+const { JSONValidator } = checkOracleRequire('@shopify/theme-check-common');
+const { toLiquidHtmlAST } = checkOracleRequire('@shopify/liquid-html-parser');
+const jsonc = checkOracleRequire('jsonc-parser');
 
 const args = process.argv.slice(2);
 const opt = (f, d) => (args.includes(f) ? Number(args[args.indexOf(f) + 1]) : d);
@@ -64,7 +64,7 @@ const errorOf = (e) => ({ name: e?.name ?? String(e), message: e?.message ?? Str
 async function runOracle(mode, docs, manifestFile, cases) {
   const schemas = loadSchemas(docs, manifestFile);
   const validator = await JSONValidator.create({ schemas: async () => schemas }, { context: mode });
-  const { TextDocument } = oracleRequire('vscode-languageserver-textdocument');
+  const { TextDocument } = checkOracleRequire('vscode-languageserver-textdocument');
   const out = [];
   for (const c of cases) {
     const result = {};

@@ -3,12 +3,12 @@
 // the theme graph, doc definitions, block parameters and CSS classes, on the themes.
 import fs from 'node:fs';
 import path from 'node:path';
-import { THEMES, oracleRequire, runLq, snippet, firstDiff } from './lib.mjs';
+import { THEMES, checkOracleRequire, runLq, snippet, firstDiff } from './lib.mjs';
 
-const tc = oracleRequire('@shopify/theme-check-node');
-const { buildThemeGraph } = oracleRequire('@shopify/theme-graph');
-const { makeGetBlockParameters } = oracleRequire('@shopify/theme-check-common');
-const { URI } = oracleRequire('vscode-uri');
+const tc = checkOracleRequire('@shopify/theme-check-node');
+const { buildThemeGraph } = checkOracleRequire('@shopify/theme-graph');
+const { makeGetBlockParameters } = checkOracleRequire('@shopify/theme-check-common');
+const { URI } = checkOracleRequire('vscode-uri');
 
 let total = 0;
 for (const [name, root] of Object.entries(THEMES)) {

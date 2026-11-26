@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { ROOT, THEMES, GEN, oracleRequire, rng } from './lib.mjs';
+import { ROOT, THEMES, GEN, checkOracleRequire, rng } from './lib.mjs';
 import { writeRegistry } from './config.mjs';
 
 process.removeAllListeners('warning');
@@ -16,10 +16,10 @@ const REGISTRY = path.join(GEN, 'registry.json');
 const WORK = path.join(GEN, 'discovery-trees');
 const DIFFS = path.join(GEN, 'discovery-diffs.txt');
 
-const common = oracleRequire('@shopify/theme-check-common');
-const node = oracleRequire('@shopify/theme-check-node');
-const glob = promisify(oracleRequire('glob'));
-const { minimatch } = oracleRequire('minimatch');
+const common = checkOracleRequire('@shopify/theme-check-common');
+const node = checkOracleRequire('@shopify/theme-check-node');
+const glob = promisify(checkOracleRequire('glob'));
+const { minimatch } = checkOracleRequire('minimatch');
 
 const diffs = fs.openSync(DIFFS, 'w');
 const note = (s) => fs.writeSync(diffs, s + '\n');

@@ -19,4 +19,5 @@ sections/main.liquid:13:7: warning UndefinedObject: Unknown object 'a' used.
 sections/main.liquid:13:11: warning UnclosedHTMLElement: Opening tag does not have a matching closing tag for condition `a` in Document 'Document'
 sections/main.liquid:14:1: warning UnusedAssign: The variable 'unused' is assigned but not used
 sections/main.liquid:15:19: warning DeprecatedFilter: Deprecated filter 'img_url', consider using 'image_url'.
+snippets/card.liquid:3:3: warning UnusedDocParam: The parameter 'subtitle' is never passed to this snippet.
 snippets/orphan.liquid:1:1: warning OrphanedSnippet: This snippet is not referenced by any other files

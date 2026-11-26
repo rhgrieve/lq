@@ -39,14 +39,36 @@ impl<'a> LiquidCheck<'a> for Check {
         let offset = tag.block_start_position.end;
         let ast = parts.ast;
         let found = get_blocks(parts.valid);
-        if !found.root_level_local_blocks.is_empty() {
-            return;
-        }
-
         // A missing type node (duplicate keys) throws in a `Promise.all`: the rest of the
         // handler is skipped, while tasks already started run on.
         let failed: Rc<RefCell<Option<lq_json::validator::JsError>>> = Rc::default();
         let reporter = Reporter { cx, offset, failed: failed.clone() };
+
+        if !found.root_level_local_blocks.is_empty() {
+            // Presets may use the local blocks. `default` may use any type declared at the root,
+            // which also includes `@app` (theme-tools 78bbce68). Types compare as `Set.has`
+            // does, `undefined` included.
+            let local: Vec<Option<&Value>> = found.root_level_local_blocks.iter().map(|b| b.node.get("type")).collect();
+            let root: Vec<Option<&Value>> = parts
+                .valid
+                .get("blocks")
+                .and_then(Value::as_array)
+                .map(|blocks| blocks.iter().map(|b| b.get("type")).collect())
+                .unwrap_or_default();
+            let presets = found.preset_level_blocks.get(&0).map_or(&[][..], Vec::as_slice);
+            let configured = presets.iter().map(|b| (b, &local)).chain(found.default_level_blocks.iter().map(|b| (b, &root)));
+            for (b, allowed) in configured {
+                let ty = b.node.get("type");
+                if !allowed.contains(&ty) {
+                    let message = format!(
+                        "Section block type \"{}\" must be defined in \"blocks\" at the root of this schema.",
+                        js_string(ty)
+                    );
+                    reporter.report(message, node_at(ast, &b.path));
+                }
+            }
+            return finish(&failed, cx);
+        }
 
         let mut errors_in_root = false;
         for b in &found.root_level_theme_blocks {

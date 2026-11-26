@@ -34,7 +34,8 @@ fn block_type(block: &Value) -> &str {
 }
 
 fn categorize_preset<'v>(out: &mut Blocks<'v>, block: &'v Value, path: Vec<String>, depth: usize) {
-    if !block.is_truthy() {
+    // Section presets may also name a block with a plain string; only objects are checked.
+    if !block.is_truthy() || !matches!(block, Value::Object(_) | Value::Array(_)) {
         return;
     }
     let mut type_path = path.clone();
@@ -98,12 +99,14 @@ pub fn get_blocks(valid_schema: &Value) -> Blocks<'_> {
     }
     if let Some(default_blocks) = valid_schema.get("default").and_then(|d| d.get("blocks")).and_then(Value::as_array) {
         for (i, block) in default_blocks.iter().enumerate() {
-            if has(block, "name") {
-                out.default_level_blocks.push(BlockWithPath {
-                    node: block,
-                    path: vec!["default".into(), "blocks".into(), i.to_string(), "type".into()],
-                });
+            // `default` may also name a block with a plain string; only objects are checked.
+            if !block.is_truthy() || !matches!(block, Value::Object(_) | Value::Array(_)) {
+                continue;
             }
+            out.default_level_blocks.push(BlockWithPath {
+                node: block,
+                path: vec!["default".into(), "blocks".into(), i.to_string(), "type".into()],
+            });
         }
     }
     out

@@ -19,4 +19,5 @@
 ::warning file=sections/main.liquid,line=13,col=11,endLine=13,endColumn=16,title=UnclosedHTMLElement::Opening tag does not have a matching closing tag for condition `a` in Document 'Document'
 ::warning file=sections/main.liquid,line=14,col=1,endLine=14,endColumn=24,title=UnusedAssign::The variable 'unused' is assigned but not used
 ::warning file=sections/main.liquid,line=15,col=19,endLine=15,endColumn=28,title=DeprecatedFilter::Deprecated filter 'img_url', consider using 'image_url'.
+::warning file=snippets/card.liquid,line=3,col=3,endLine=3,endColumn=44,title=UnusedDocParam::The parameter 'subtitle' is never passed to this snippet.
 ::warning file=snippets/orphan.liquid,line=1,col=1,endLine=1,endColumn=2,title=OrphanedSnippet::This snippet is not referenced by any other files

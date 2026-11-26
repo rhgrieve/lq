@@ -5,11 +5,11 @@
 // are never touched.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, oracleRequire } from './lib.mjs';
+import { ROOT, checkOracleRequire } from './lib.mjs';
 
-const { allChecks } = oracleRequire('@shopify/theme-check-common');
+const { allChecks } = checkOracleRequire('@shopify/theme-check-common');
 const index = fs.readFileSync(
-  path.join(ROOT, 'reference/theme-tools/packages/theme-check-common/src/checks/index.ts'),
+  path.join(ROOT, 'reference/theme-tools-main/packages/theme-check-common/src/checks/index.ts'),
   'utf8',
 );
 const names = index
@@ -108,7 +108,11 @@ fs.writeFileSync(path.join(ROOT, 'crates/lq-check/src/registry.rs'), reg);
 
 const checksDir = path.join(ROOT, 'crates/lq-check/src/checks');
 fs.mkdirSync(checksDir, { recursive: true });
-let mod = `//! One file per check; \`scripts/parity/gen-registry.mjs\` lists them.\n//! A helper shared by several checks goes in \`shared\`.\n\npub mod shared;\n`;
+// Helpers shared by several checks are `shared*.rs`, kept in the order they were listed.
+const shared = fs
+  .readFileSync(path.join(checksDir, 'mod.rs'), 'utf8')
+  .match(/^pub mod shared\w*;$/gm);
+let mod = `//! One file per check; \`scripts/parity/gen-registry.mjs\` lists them.\n//! A helper shared by several checks goes in \`shared\`.\n\n${shared.join('\n')}\n`;
 names.forEach((name, i) => {
   mod += `pub mod ${mods[i]};\n`;
   const file = path.join(checksDir, `${mods[i]}.rs`);

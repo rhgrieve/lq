@@ -7,9 +7,9 @@
 // causes it: the first whose fix alone (`--only-divergence`) produces that difference. A
 // difference no fix explains is a failure.
 import path from 'node:path';
-import { THEMES, oracleRequire, runLq, snippet } from './lib.mjs';
+import { THEMES, checkOracleRequire, runLq, snippet } from './lib.mjs';
 
-const { themeCheckRun } = oracleRequire('@shopify/theme-check-node');
+const { themeCheckRun } = checkOracleRequire('@shopify/theme-check-node');
 const args = process.argv.slice(2);
 const show = args.includes('--show') ? Number(args[args.indexOf('--show') + 1]) : 40;
 const defaultMode = args.includes('--default-mode');

@@ -31,7 +31,8 @@ enum Fast {
 enum Seg {
     Lit(String),
     Globstar,
-    Fast(Fast),
+    /// A fast test, and `options.dot`.
+    Fast(Fast, bool),
     Re(Box<JsRegex>),
 }
 
@@ -41,15 +42,18 @@ impl Seg {
             Seg::Lit(s) => s == f,
             Seg::Globstar => false,
             Seg::Re(re) => re.is_match(f),
-            Seg::Fast(fast) => match fast {
-                Fast::Star => !f.is_empty() && !f.starts_with('.'),
-                Fast::StarExt(ext) => !f.starts_with('.') && f.ends_with(ext.as_str()),
-                Fast::Qmarks(len, ext) => {
-                    utf16_len(f) == *len && !f.starts_with('.') && f.ends_with(ext.as_str())
+            // `starTest`, `starTestDot` and the rest: with `dot`, only `.` and `..` are
+            // kept from matching a wildcard at the start.
+            Seg::Fast(fast, dot) => {
+                let lead = if *dot { f != "." && f != ".." } else { !f.starts_with('.') };
+                match fast {
+                    Fast::Star => !f.is_empty() && lead,
+                    Fast::StarExt(ext) => (*dot || lead) && f.ends_with(ext.as_str()),
+                    Fast::Qmarks(len, ext) => utf16_len(f) == *len && lead && f.ends_with(ext.as_str()),
+                    Fast::StarDotStar => lead && f.contains('.'),
+                    Fast::DotStar => f != "." && f != ".." && f.starts_with('.'),
                 }
-                Fast::StarDotStar => !f.starts_with('.') && f.contains('.'),
-                Fast::DotStar => f != "." && f != ".." && f.starts_with('.'),
-            },
+            }
         }
     }
 }
@@ -57,6 +61,8 @@ impl Seg {
 /// A compiled pattern.
 #[derive(Debug)]
 pub struct Minimatch {
+    /// `options.dot`.
+    dot: bool,
     comment: bool,
     empty: bool,
     negate: bool,
@@ -73,7 +79,13 @@ pub fn minimatch(path: &str, pattern: &str) -> bool {
 
 impl Minimatch {
     pub fn new(pattern: &str) -> Minimatch {
-        let mut mm = Minimatch { comment: false, empty: false, negate: false, set: Vec::new(), error: None };
+        Minimatch::with_dot(pattern, false)
+    }
+
+    /// `new Minimatch(pattern, { dot })`: with `dot`, wildcards and `**` match names that
+    /// start with a `.`, other than `.` and `..`.
+    pub fn with_dot(pattern: &str, dot: bool) -> Minimatch {
+        let mut mm = Minimatch { dot, comment: false, empty: false, negate: false, set: Vec::new(), error: None };
         if utf16_len(pattern) > 64 * 1024 {
             mm.error = Some("pattern is too long".into());
             return mm;
@@ -100,7 +112,7 @@ impl Minimatch {
             let parts = level_one_optimize(slash_split(g));
             let mut segs = Vec::with_capacity(parts.len());
             for p in parts {
-                match parse_segment(p) {
+                match parse_segment(p, dot) {
                     Ok(s) => segs.push(s),
                     Err(e) => {
                         mm.error = Some(e);
@@ -140,7 +152,7 @@ impl Minimatch {
         }
         for pattern in &self.set {
             let hit = if pattern.iter().any(|s| matches!(s, Seg::Globstar)) {
-                match_globstar(file, pattern)
+                match_globstar(file, pattern, self.dot)
             } else {
                 match_one(file, pattern, 0, 0)
             };
@@ -230,8 +242,9 @@ fn level_one_optimize(parts: Vec<&str>) -> Vec<&str> {
     set
 }
 
-fn is_dot_part(f: &str) -> bool {
-    f.starts_with('.')
+/// What `**` doesn't walk into: `.` and `..`, and without `dot` any name starting with `.`.
+fn is_dot_part(f: &str, dot: bool) -> bool {
+    f == "." || f == ".." || (!dot && f.starts_with('.'))
 }
 
 fn match_one(file: &[&str], pattern: &[Seg], mut fi: usize, mut pi: usize) -> bool {
@@ -254,7 +267,7 @@ fn match_one(file: &[&str], pattern: &[Seg], mut fi: usize, mut pi: usize) -> bo
     }
 }
 
-fn match_globstar(file: &[&str], pattern: &[Seg]) -> bool {
+fn match_globstar(file: &[&str], pattern: &[Seg], dot: bool) -> bool {
     let is_gs = |s: &Seg| matches!(s, Seg::Globstar);
     let firstgs = pattern.iter().position(is_gs).expect("globstar");
     let lastgs = pattern.iter().rposition(is_gs).expect("globstar");
@@ -297,7 +310,7 @@ fn match_globstar(file: &[&str], pattern: &[Seg]) -> bool {
         let mut i = file_index;
         while i < end {
             saw_some = true;
-            if is_dot_part(file[i]) {
+            if is_dot_part(file[i], dot) {
                 return false;
             }
             i += 1;
@@ -328,7 +341,7 @@ fn match_globstar(file: &[&str], pattern: &[Seg]) -> bool {
             (*s, file_length - (sums[idx] + s.len()) as isize)
         })
         .collect();
-    match_body_sections(file, &segs, file_index, 0, 0, tail_match != 0) == Some(true)
+    match_body_sections(file, &segs, file_index, 0, 0, tail_match != 0, dot) == Some(true)
 }
 
 /// `Some(false)` is "not matching", `None` "not matching, stop trying".
@@ -339,12 +352,13 @@ fn match_body_sections(
     body_index: usize,
     depth: usize,
     mut saw_tail: bool,
+    dot: bool,
 ) -> Option<bool> {
     let Some((body, after)) = segs.get(body_index) else {
         let mut i = file_index;
         while i < file.len() {
             saw_tail = true;
-            if is_dot_part(file[i]) {
+            if is_dot_part(file[i], dot) {
                 return Some(false);
             }
             i += 1;
@@ -355,12 +369,12 @@ fn match_body_sections(
         let end = (file_index + body.len()).min(file.len());
         let m = match_one(&file[..end], body, file_index, 0);
         if m && depth < 200 {
-            let sub = match_body_sections(file, segs, file_index + body.len(), body_index + 1, depth + 1, saw_tail);
+            let sub = match_body_sections(file, segs, file_index + body.len(), body_index + 1, depth + 1, saw_tail, dot);
             if sub != Some(false) {
                 return sub;
             }
         }
-        if file_index < file.len() && is_dot_part(file[file_index]) {
+        if file_index < file.len() && is_dot_part(file[file_index], dot) {
             return Some(false);
         }
         file_index += 1;
@@ -764,7 +778,7 @@ fn expand_(s: String, depth: usize, mut is_top: bool) -> Vec<String> {
 
 const EXT_EXCLUDED: &[char] = &['+', '@', '!', '?', '*', '[', '('];
 
-fn parse_segment(p: &str) -> Result<Seg, String> {
+fn parse_segment(p: &str, dot: bool) -> Result<Seg, String> {
     if p == "**" {
         return Ok(Seg::Globstar);
     }
@@ -782,31 +796,32 @@ fn parse_segment(p: &str) -> Result<Seg, String> {
     let stars = b.iter().take_while(|c| **c == b'*').count();
     if stars > 0 {
         if stars == b.len() {
-            return Ok(Seg::Fast(Fast::Star));
+            return Ok(Seg::Fast(Fast::Star, dot));
         }
         let rest = &p[stars..];
         if !rest.contains(EXT_EXCLUDED) {
-            return Ok(Seg::Fast(Fast::StarExt(rest.to_string())));
+            return Ok(Seg::Fast(Fast::StarExt(rest.to_string()), dot));
         }
     }
     let qmarks = b.iter().take_while(|c| **c == b'?').count();
     if qmarks > 0 {
         let rest = &p[qmarks..];
         if !rest.contains(EXT_EXCLUDED) {
-            return Ok(Seg::Fast(Fast::Qmarks(utf16_len(p), rest.to_string())));
+            return Ok(Seg::Fast(Fast::Qmarks(utf16_len(p), rest.to_string()), dot));
         }
     }
     if stars > 0 {
         let rest = &b[stars..];
         if rest[0] == b'.' && rest.len() > 1 && rest[1..].iter().all(|c| *c == b'*') {
-            return Ok(Seg::Fast(Fast::StarDotStar));
+            return Ok(Seg::Fast(Fast::StarDotStar, dot));
         }
     }
     if b[0] == b'.' && b.len() > 1 && b[1..].iter().all(|c| *c == b'*') {
-        return Ok(Seg::Fast(Fast::DotStar));
+        return Ok(Seg::Fast(Fast::DotStar, dot));
     }
 
     let mut ast = Arena::from_glob(p);
+    ast.dot = dot;
     match ast.mm_pattern() {
         MmPattern::Lit(s) => Ok(Seg::Lit(s)),
         MmPattern::Re(src, uflag) => {
@@ -1115,6 +1130,8 @@ struct Ast {
 }
 
 struct Arena {
+    /// `options.dot`, for `regexpSource`'s `allowDot ?? options.dot`.
+    dot: bool,
     nodes: Vec<Ast>,
     negs: Vec<usize>,
     filled_negs: bool,
@@ -1191,7 +1208,7 @@ impl Arena {
     }
 
     fn from_glob(pattern: &str) -> Arena {
-        let mut a = Arena { nodes: Vec::new(), negs: Vec::new(), filled_negs: false };
+        let mut a = Arena { dot: false, nodes: Vec::new(), negs: Vec::new(), filled_negs: false };
         let root = a.new_node(None, None);
         let chars: Vec<char> = pattern.chars().collect();
         a.parse_ast(&chars, root, 0, 0);
@@ -1520,7 +1537,7 @@ impl Arena {
     }
 
     fn regexp_source(&mut self, id: usize, allow_dot: Option<bool>) -> (String, String, bool, bool) {
-        let dot = allow_dot.unwrap_or(false);
+        let dot = allow_dot.unwrap_or(self.dot);
         if id == 0 {
             self.flatten(0);
             self.fill_negs(0);

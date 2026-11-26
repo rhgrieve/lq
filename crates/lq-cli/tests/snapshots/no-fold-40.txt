@@ -291,6 +291,18 @@ using 'image_url'.
    │      + {% assign x = 'a' | image_u…
    ╰ docs lq explain DeprecatedFilter
 
+warning UnusedDocParam
+The parameter 'subtitle' is never passed
+to this snippet.
+  ╭─ snippets/card.liquid:3:3
+  │
+2 │   @param {string} title - The title
+3 │   @param {string} [subtitle] - The …
+  ·   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4 │ {% enddoc %}
+  │
+  ╰ docs lq explain UnusedDocParam
+
 warning OrphanedSnippet
 This snippet is not referenced by any
 other files
@@ -298,7 +310,7 @@ other files
   │
   ╰ docs lq explain OrphanedSnippet
 
-✖ 10 errors   ▲ 12 warnings
+✖ 10 errors   ▲ 13 warnings
 
   6 ████████████████ UndefinedObject
   4 ███████████      MatchingTranslations
@@ -311,9 +323,11 @@ other files
   1 ███              UnclosedHTMLElement
   1 ███              UnrecognizedRenderSnippetArguments
   1 ███              UnusedAssign
+  1 ███              UnusedDocParam
 
 → 1 offense can be fixed with lq check --auto-correct
 → 2 offenses have a fix --auto-correct can't apply, shown as "fix"
 → 5 offenses have a suggested change, shown as "try"
-22 offenses in 5 of 8 files checked in <time>
-failed: 10 offenses at fail level error; the other 12 don't fail this run
+23 offenses in 6 of 8 files checked in <time>
+failed: 10 offenses at fail level error; the other 13 don't fail this run
+[lq] note: 2 enabled checks are not implemented yet and did not run

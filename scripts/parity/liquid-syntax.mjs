@@ -11,10 +11,10 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { GEN, ROOT, THEMES, breakSource, hash, liquidFiles, lqBin, oracleRequire } from './lib.mjs';
+import { GEN, ROOT, THEMES, breakSource, hash, liquidFiles, lqBin, checkOracleRequire } from './lib.mjs';
 
-const { check, allChecks, toSourceCode } = oracleRequire('@shopify/theme-check-common');
-const YAML = oracleRequire('yaml');
+const { check, allChecks, toSourceCode } = checkOracleRequire('@shopify/theme-check-common');
+const YAML = checkOracleRequire('yaml');
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);

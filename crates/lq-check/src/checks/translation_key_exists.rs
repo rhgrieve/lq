@@ -100,12 +100,21 @@ impl<'a> LiquidCheck<'a> for TranslationKeyExists<'a> {
         }
         let schema_locales = self.schema.as_ref().and_then(|s| s.get("locales")).and_then(|l| l.get(locale));
 
+        let section_prefix = crate::to_schema::is_section(cx.uri())
+            .then(|| format!("sections.{}.", lq_json::uri::basename(cx.uri(), Some(".liquid"))));
+
         // Only worked out once something is missing.
         let mut known_keys: Option<Vec<String>> = None;
         for &(key, start, end) in &self.nodes {
             let null_not_found = cx.divergence(Divergence::NullInPath);
+            // A section's own keys may be written `sections.<name>.<key>` (theme-tools 9a0377db).
+            let section_key = section_prefix.as_deref().and_then(|p| key.strip_prefix(p));
             let exists = key_exists(key, translations, null_not_found)
                 .and_then(|found| if found { Ok(true) } else { key_exists(key, schema_locales, null_not_found) })
+                .and_then(|found| match section_key {
+                    Some(rest) if !found => key_exists(rest, schema_locales, null_not_found),
+                    _ => Ok(found),
+                })
                 .map(|found| found || docset.is_some_and(|d| d.has_system_translation(key)));
             match exists {
                 Ok(true) => continue,

@@ -34,6 +34,11 @@ pub trait Dependencies<'a>: Send + Sync {
     fn references(&'a self, uri: &str) -> Vec<Reference>;
     fn has_dependencies(&self) -> bool;
     fn dependencies(&'a self, uri: &str) -> Vec<Reference>;
+    /// `remoteFileSize(url)`: a remote file's size in bytes, 0 when it can't be found. Upstream's
+    /// default is a HEAD request; `lq` never uses the network, so its runs answer 0.
+    fn remote_file_size(&'a self, _url: &str) -> u64 {
+        0
+    }
     /// `None` means use the default, read from `.shopify/metafields.json`.
     fn metafield_definitions(&'a self, _root_uri: &str) -> Option<crate::context_utils::MetafieldDefinitionMap> {
         None
@@ -132,7 +137,7 @@ impl<'a> NodeDependencies<'a> {
 
     fn graph_result(&'a self) -> &'a Result<ThemeGraph, String> {
         self.graph.get_or_init(|| {
-            build_theme_graph(&self.config.root_uri, self, self.theme, self.config.context, self.config.divergences)
+            build_theme_graph(&self.config.root_uri, self, self.theme, self.config.context)
         })
     }
 

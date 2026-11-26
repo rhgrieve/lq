@@ -18,31 +18,22 @@ fn create<'a, 'f>(_cx: &LiquidCx<'a, 'f>) -> Option<Box<dyn LiquidCheck<'a> + 'a
 
 struct CdnPreconnect;
 
-/// `valueIncludes(attr, '.+cdn.shopify.com.+')`: the word is a regular expression.
-fn shopify_cdn_regex() -> &'static JsRegex {
+/// `SHOPIFY_CDN_ORIGIN`, `/^(https?:)?\/\/cdn\.shopify\.com(:443)?/i`.
+fn shopify_cdn_origin() -> &'static JsRegex {
     static RE: OnceLock<JsRegex> = OnceLock::new();
-    RE.get_or_init(|| JsRegex::new(r"(^|\s).+cdn.shopify.com.+(\s|$)", "").expect("valid regex"))
+    RE.get_or_init(|| JsRegex::new(r"^(https?:)?\/\/cdn\.shopify\.com(:443)?", "i").expect("valid regex"))
 }
 
-/// The lowercased hostname of an absolute or protocol-relative http(s) URL.
-fn url_hostname(url: &str) -> Option<String> {
-    let url = lq_syntax::js::trim(url);
-    let lower = url.get(..8).map(str::to_ascii_lowercase).unwrap_or_default();
-    let rest = if lower.starts_with("https://") {
-        &url[8..]
-    } else if lower.starts_with("http://") {
-        &url[7..]
-    } else {
-        url.strip_prefix("//")?
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = authority.rsplit('@').next().unwrap_or("");
-    Some(host.split(':').next().unwrap_or("").to_ascii_lowercase())
-}
-
-/// [`Divergence::CdnPreconnectHost`].
-fn is_shopify_cdn_url(url: &str) -> bool {
-    url_hostname(url).as_deref() == Some("cdn.shopify.com")
+/// `isShopifyCdnUrl(attr)`: the href starts with the cdn.shopify.com origin in static text, and
+/// the host ends there: at a path, query or fragment, or at the end of the whole value.
+fn is_shopify_cdn_url(value: &[Node<'_>]) -> bool {
+    let Some(Node::TextNode(first)) = value.first() else { return false };
+    let url = lq_syntax::js::trim(&first.value);
+    let Some(origin) = shopify_cdn_origin().exec_at(url, 0) else { return false };
+    match &url[origin.end()..] {
+        "" => value.len() == 1,
+        after => after.starts_with(['/', '?', '#']),
+    }
 }
 
 impl<'a> LiquidCheck<'a> for CdnPreconnect {
@@ -57,17 +48,9 @@ impl<'a> LiquidCheck<'a> for CdnPreconnect {
         if !is_preconnect {
             return;
         }
-        let fixed = cx.divergence(Divergence::CdnPreconnectHost);
-        let is_shopify_cdn = attributes.iter().any(|a| {
-            is_attr(a, "href")
-                && valued_attribute(a).is_some_and(|v| {
-                    if fixed {
-                        // The URL's start is what decides its host, so only a leading text node.
-                        return matches!(v.value.first(), Some(Node::TextNode(t)) if is_shopify_cdn_url(&t.value));
-                    }
-                    v.value.iter().any(|n| matches!(n, Node::TextNode(t) if shopify_cdn_regex().is_match(&t.value)))
-                })
-        });
+        let is_shopify_cdn = attributes
+            .iter()
+            .any(|a| is_attr(a, "href") && valued_attribute(a).is_some_and(|v| is_shopify_cdn_url(&v.value)));
         if !is_shopify_cdn {
             return;
         }

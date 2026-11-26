@@ -6,9 +6,9 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { GEN, firstDiff, lqBin, oracleRequire } from './lib.mjs';
+import { GEN, firstDiff, lqBin, checkOracleRequire } from './lib.mjs';
 
-const { checkAndAutofix } = oracleRequire('@shopify/theme-check-node');
+const { checkAndAutofix } = checkOracleRequire('@shopify/theme-check-node');
 const WORK = path.join(GEN, 'autofix');
 
 const write = (root, files) => {

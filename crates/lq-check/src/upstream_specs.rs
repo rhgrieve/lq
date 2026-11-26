@@ -164,9 +164,17 @@ pub fn run_case(
     docsets: &dyn Fn(&str) -> Option<Value>,
     divergences: Divergences,
 ) -> CaseOutcome {
-    let files = case.get("files").and_then(Value::as_object).cloned().unwrap_or_default();
-    if files.keys().any(|k| k.starts_with("http://") || k.starts_with("https://")) {
-        return CaseOutcome::Unsupported("remote file size".into());
+    // A file at a URL is a remote file: the check only ever sees its size.
+    let is_remote = |k: &str| k.starts_with("http://") || k.starts_with("https://");
+    let all_files = case.get("files").and_then(Value::as_object).cloned().unwrap_or_default();
+    let mut files = Object::new();
+    let mut remote_sizes = Object::new();
+    for (k, v) in all_files.iter() {
+        if is_remote(k) {
+            remote_sizes.insert(k, Value::Number(expand(v).len() as f64));
+        } else {
+            files.insert(k, v.clone());
+        }
     }
     let listed: Vec<String> = match case.get("checks").and_then(Value::as_array) {
         Some(l) => l.iter().filter_map(Value::as_str).map(String::from).collect(),
@@ -216,6 +224,7 @@ pub fn run_case(
     recorded.insert("themeDocset", docset(case, docsets));
     recorded.insert("getReferences", Value::Object(refs));
     recorded.insert("getDependencies", Value::Object(deps_of));
+    recorded.insert("remoteFileSize", Value::Object(remote_sizes));
     let recorded = Value::Object(recorded);
 
     let mode = match case.get("mode").and_then(Value::as_str) {

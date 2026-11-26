@@ -535,6 +535,17 @@ pub fn basename(uri: &str, ext: Option<&str>) -> String {
     }
 }
 
+/// `path.fileSystemPath(uri)`: the path that a file system reads at `uri`, decoded once, with
+/// `\` read as a separator as Windows does, and with `.` and `..` resolved.
+pub fn file_system_path(uri: &str) -> String {
+    let decoded = match Uri::parse(uri) {
+        Ok(u) => u.path.replace('\\', "/"),
+        Err(_) => uri.replace('\\', "/"),
+    };
+    // `Utils.joinPath(URI.file('/'), decodedPath).path`
+    posix_join(&["/", decoded.as_str()])
+}
+
 /// `path.fsPath(uri)`.
 pub fn fs_path(uri: &str) -> String {
     match Uri::parse(uri) {

@@ -1,5 +1,5 @@
-//! `AssetSizeJavaScript`. The remote path never reports: `lq` has no network, see
-//! `has_remote_asset_size_exceeded_threshold`.
+//! `AssetSizeJavaScript`. A remote file's size comes from `remoteFileSize`, which is 0 in `lq`'s
+//! own runs: `lq` has no network, see `has_remote_asset_size_exceeded_threshold`.
 
 use super::shared_rules::{check_asset_size_attribute, check_asset_size_filter, find_valued};
 use crate::api::*;

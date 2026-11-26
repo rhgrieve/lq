@@ -152,6 +152,11 @@ pub fn check_app_block_asset_size(cx: &LiquidCx<'_, '_>, tag: &LiquidRawTag<'_>,
     };
     let end = advance_utf16(cx.source(), start, units);
 
+    // A name that leaves the assets directory, as written or decoded (theme-tools 19c3b6ab).
+    if !cx.is_asset_file_name(&name) {
+        cx.report(LiquidProblem::new(format!("'{name}' must be the name of a file in the assets directory."), start, end));
+        return;
+    }
     if !cx.does_file_exist(&relative_path) {
         cx.report(LiquidProblem::new(format!("'{name}' does not exist."), start, end));
         return;
@@ -174,7 +179,7 @@ pub fn check_asset_size_attribute(cx: &LiquidCx<'_, '_>, attr: &AttrNode<'_>, me
     let position = attr.attribute_position;
     // `/(https?:)?\/\//.test(url)`: the optional group makes this a substring test.
     if let Node::TextNode(text) = value {
-        if text.value.contains("//") && has_remote_asset_size_exceeded_threshold(&text.value, threshold) {
+        if text.value.contains("//") && has_remote_asset_size_exceeded_threshold(cx, &text.value, threshold) {
             cx.report(LiquidProblem::new(message(&number_to_string(threshold)), position.start, position.end));
         }
     }
@@ -207,7 +212,7 @@ pub fn check_asset_size_filter<'a>(
     let threshold = cx.settings().f64("thresholdInBytes").unwrap_or(f64::NAN);
     if variable.filters.len() == 1
         && expression.value.contains("//")
-        && has_remote_asset_size_exceeded_threshold(expression.value, threshold)
+        && has_remote_asset_size_exceeded_threshold(cx, expression.value, threshold)
     {
         let p = variable.expression.position();
         cx.report(LiquidProblem::new(message(&number_to_string(threshold)), p.start, p.end));

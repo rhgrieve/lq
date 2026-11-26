@@ -521,6 +521,12 @@ impl<'a> Dependencies<'a> for MockDependencies<'a> {
             Provider::Absent => Arc::new(BTreeSet::new()),
         }
     }
+    fn remote_file_size(&'a self, url: &str) -> u64 {
+        match provider(self.recorded, "remoteFileSize") {
+            Provider::Table(t) => t.get(url).and_then(Value::as_f64).map_or(0, |n| n as u64),
+            _ => 0,
+        }
+    }
     fn has_references(&self) -> bool {
         matches!(provider(self.recorded, "getReferences"), Provider::Table(_))
     }

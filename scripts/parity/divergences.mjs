@@ -11,9 +11,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { GEN, ORACLE, oracleRequire, runLq } from './lib.mjs';
+import { GEN, CHECK_ORACLE, checkOracleRequire, runLq } from './lib.mjs';
 
-const { createCorrector, applyFixToString } = oracleRequire('@shopify/theme-check-common');
+const { createCorrector, applyFixToString } = checkOracleRequire('@shopify/theme-check-common');
 const WORK = path.join(GEN, 'divergences');
 const args = process.argv.slice(2);
 const show = args.includes('--show');
@@ -42,53 +42,6 @@ const suggestions = (list, check, file) =>
   list.filter((o) => o.check === check && o.file === file).flatMap((o) => o.suggest.map((s) => s.applied));
 
 const CASES = [
-  {
-    id: 'GraphNoType',
-    name: 'a context override template section has no type',
-    checks: ['OrphanedSnippet'],
-    files: {
-      ...INDEX,
-      'sections/main.liquid': "{% render 'used' %}",
-      'snippets/used.liquid': 'x',
-      'snippets/lonely.liquid': 'y',
-      'templates/index.context.b2b.json': '{"sections":{"main":{"settings":{}}},"order":["main"]}',
-    },
-    upstream: exactly(['OrphanedSnippet'], [
-      ['OrphanedSnippet', '0:0-0:1', 'This snippet is not referenced by any other files'],
-      ['OrphanedSnippet', '0:0-0:1', 'This snippet is not referenced by any other files'],
-    ]),
-    fixed: exactly(['OrphanedSnippet'], [['OrphanedSnippet', '0:0-0:1', 'This snippet is not referenced by any other files']]),
-    extra: (r) => r.fixed.some((o) => o.file === 'snippets/lonely.liquid') || 'lonely.liquid should stay orphaned',
-  },
-  {
-    id: 'GraphNoType',
-    name: 'a template block has no type',
-    checks: ['OrphanedSnippet'],
-    files: {
-      ...INDEX,
-      'sections/main.liquid': '{% content_for "blocks" %}{% schema %}{"name":"m","blocks":[{"type":"@theme"}]}{% endschema %}',
-      'blocks/b.liquid': "{% render 'used' %}{% schema %}{\"name\":\"b\"}{% endschema %}",
-      'snippets/used.liquid': 'x',
-      'templates/page.json': '{"sections":{"main":{"type":"main","blocks":{"a":{"settings":{}}}}},"order":["main"]}',
-    },
-    upstream: exactly(['OrphanedSnippet'], [['OrphanedSnippet', '0:0-0:1', 'This snippet is not referenced by any other files']]),
-    fixed: exactly(['OrphanedSnippet'], []),
-  },
-  {
-    id: 'GraphNoType',
-    name: 'a contextual template adds a block to an inherited section',
-    checks: ['OrphanedSnippet'],
-    files: {
-      ...INDEX,
-      'sections/main.liquid': '{% content_for "blocks" %}{% schema %}{"name":"m","blocks":[{"type":"@theme"}]}{% endschema %}',
-      'blocks/promo.liquid': "{% render 'used' %}{% schema %}{\"name\":\"p\"}{% endschema %}",
-      'snippets/used.liquid': 'x',
-      'templates/index.context.ca.json':
-        '{"context":{"market":"ca"},"parent":"index.json","sections":{"main":{"blocks":{"b":{"type":"promo"}},"block_order":["b"]}}}',
-    },
-    upstream: exactly(['OrphanedSnippet'], [['OrphanedSnippet', '0:0-0:1', 'This snippet is not referenced by any other files']]),
-    fixed: exactly(['OrphanedSnippet'], []),
-  },
   {
     id: 'GraphFailure',
     name: 'a section that is not an object fails the graph: a snippet looks orphaned',
@@ -405,52 +358,6 @@ const CASES = [
     fixed: exactly(['AssetSizeJavaScript'], [['AssetSizeJavaScript', '0:24-0:58', 'JavaScript on every page load exceeds compressed size threshold (10000 Bytes), consider using the import on interaction pattern.']]),
   },
   {
-    id: 'CdnPreconnectHost',
-    name: 'missed without a path, wrong on lookalike hosts',
-    checks: ['CdnPreconnect'],
-    files: {
-      'snippets/a.liquid':
-        '<link rel="preconnect" href="https://cdn.shopify.com">\n<link rel="preconnect" href="https://xcdnXshopify.comy/a">\n<link rel="preconnect" href="https://cdn.shopify.com/">\n<link rel="preconnect" href="https://acdn.shopify.com.evil/">\n<link rel="preconnect" href="//CDN.shopify.com/x">',
-    },
-    upstream: exactly(['CdnPreconnect'], [
-      ['CdnPreconnect', '1:0-1:58', 'Preconnecting to cdn.shopify.com is unnecessary and can lead to worse performance'],
-      ['CdnPreconnect', '2:0-2:55', 'Preconnecting to cdn.shopify.com is unnecessary and can lead to worse performance'],
-      ['CdnPreconnect', '3:0-3:61', 'Preconnecting to cdn.shopify.com is unnecessary and can lead to worse performance'],
-    ]),
-    fixed: exactly(['CdnPreconnect'], [
-      ['CdnPreconnect', '0:0-0:54', 'Preconnecting to cdn.shopify.com is unnecessary and can lead to worse performance'],
-      ['CdnPreconnect', '2:0-2:55', 'Preconnecting to cdn.shopify.com is unnecessary and can lead to worse performance'],
-      ['CdnPreconnect', '4:0-4:50', 'Preconnecting to cdn.shopify.com is unnecessary and can lead to worse performance'],
-    ]),
-  },
-  {
-    id: 'RouteBoundary',
-    name: 'routes match by prefix',
-    checks: ['HardcodedRoutes'],
-    files: {
-      'snippets/a.liquid':
-        `<a href="/collections/allx">a</a>\n<a href="/cartoons">b</a>\n<a href="/cart?x=1">c</a>\n<a href="/cart#a">c</a>\n<a href="/cart/">c</a>\n<a href="/cart">c</a>\n{{ 'x' | link_to: '/cartoons' }}\n{{ 'x' | link_to: '/cart' }}`,
-    },
-    upstream: exactly(['HardcodedRoutes'], [
-      ['HardcodedRoutes', '0:9-0:25', 'Use routes object {{ routes.all_products_collection_url }} instead of hardcoding /collections/all'],
-      ['HardcodedRoutes', '1:9-1:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '2:9-2:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '3:9-3:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '4:9-4:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '5:9-5:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '6:19-6:24', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '7:19-7:24', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-    ]),
-    fixed: exactly(['HardcodedRoutes'], [
-      ['HardcodedRoutes', '0:9-0:21', 'Use routes object {{ routes.collections_url }} instead of hardcoding /collections'],
-      ['HardcodedRoutes', '2:9-2:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '3:9-3:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '4:9-4:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '5:9-5:14', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-      ['HardcodedRoutes', '7:19-7:24', 'Use routes object {{ routes.cart_url }} instead of hardcoding /cart'],
-    ]),
-  },
-  {
     id: 'ImgUrlPrototype',
     name: 'product_img_url: the suggestion prints a native function',
     checks: ['DeprecatedFilter'],
@@ -490,8 +397,8 @@ const CASES = [
 
 // Runs in a child, because some of upstream's failures take the process down.
 const ORACLE_RUNNER = `
-const { themeCheckRun } = require(${JSON.stringify(path.join(ORACLE, 'node_modules/@shopify/theme-check-node'))});
-const { createCorrector, applyFixToString } = require(${JSON.stringify(path.join(ORACLE, 'node_modules/@shopify/theme-check-common'))});
+const { themeCheckRun } = require(${JSON.stringify(path.join(CHECK_ORACLE, 'node_modules/@shopify/theme-check-node'))});
+const { createCorrector, applyFixToString } = require(${JSON.stringify(path.join(CHECK_ORACLE, 'node_modules/@shopify/theme-check-common'))});
 const fs = require('node:fs'), path = require('node:path');
 const root = process.argv[1];
 console.error = () => {};
