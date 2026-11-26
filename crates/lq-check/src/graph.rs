@@ -92,8 +92,9 @@ struct Builder<'a, 'b> {
     cache: HashMap<String, ThemeModule>,
     traversed: HashSet<String>,
     block_names: Option<Vec<String>>,
-    /// [`Divergence::GraphNoType`].
-    skip_no_type: bool,
+    /// [`Divergence::GraphNoType`]: traverse contextual templates and section groups as
+    /// theme-graph 0.3.10 does.
+    contextual: bool,
 }
 
 const IMAGE_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "gif", "webp", "heic", "ico"];
@@ -134,6 +135,14 @@ fn find_type_property<'n, 's>(node: Option<&'n JsonNode<'s>>) -> R<Option<&'n Js
         Some(JsonNode::Array { children, .. }) if children.is_empty() => Ok(None),
         _ => Err("Cannot read properties of undefined (reading 'children')".into()),
     }
+}
+
+/// build.ts `CONTEXTUAL_JSON`, `/\.context\.[^./]+\.json$/i`: how Shopify names a contextual
+/// template or section group.
+fn is_contextual_json(u: &str) -> bool {
+    let u = u.to_ascii_lowercase();
+    let Some((rest, name)) = u.strip_suffix(".json").and_then(|s| s.rsplit_once('.')) else { return false };
+    !name.is_empty() && !name.contains('/') && rest.ends_with(".context")
 }
 
 fn range_of(node: &JsonNode<'_>, offset: u32) -> (u32, u32) {
@@ -467,6 +476,9 @@ impl<'a> Builder<'a, '_> {
     }
 
     fn traverse_json(&mut self, u: &str, kind: ModuleKind) -> R {
+        if self.contextual {
+            return self.traverse_json_contextual(u, kind);
+        }
         self.with_source(u, |this, file| {
             let Ast::Json(ast) = &file.ast else { return Err("Unexpected code path encountered".into()) };
             let Ok(ast) = ast else { return Ok(()) };
@@ -477,11 +489,7 @@ impl<'a> Builder<'a, '_> {
                 })?);
                 let path = ["sections".to_string(), key];
                 let node = node_at_path(ast, &path_keys(&path));
-                // Context override templates legitimately have entries without a type. Upstream
-                // creates a module named `undefined`, then throws on the missing `type` property.
-                if this.skip_no_type && matches!(find_type_property(node), Ok(None)) {
-                    continue;
-                }
+                // Upstream creates a module named `undefined`, then throws on the missing `type`.
                 let module = this.section_module(&section_type);
                 let prop = find_type_property(node)?.ok_or("Cannot read properties of undefined (reading 'loc')")?;
                 this.bind(u, &module, Some(range_of(prop, 0)), ReferenceType::Direct);
@@ -490,20 +498,86 @@ impl<'a> Builder<'a, '_> {
             }
             if kind == ModuleKind::JsonTemplate {
                 let layout = parsed.get("layout");
-                let name = match layout {
-                    Some(Value::Bool(false)) => None,
-                    None => Some("theme".to_string()),
-                    Some(v) => Some(str_of(v)),
-                };
-                if let Some(name) = name {
-                    let module = this.layout_module(&name);
-                    let range = layout.and_then(|_| node_at_path(ast, &["layout"])).map(|n| range_of(n, 0));
-                    this.bind(u, &module, range, ReferenceType::Indirect);
-                    this.traverse(&module)?;
-                }
+                this.bind_layout(u, ast, layout, layout)?;
             }
             Ok(())
         })
+    }
+
+    /// `traverseJsonModule` as of theme-graph 0.3.10 ([`Divergence::GraphNoType`]). A contextual
+    /// template or section group (`*.context.<name>.json`) overrides the file its `parent`
+    /// names, so its sections and blocks already in the parent have no `type`: they inherit it.
+    /// Those don't link, but the blocks they add do. `sections` may be left out, and a template
+    /// without `layout` uses its parent's.
+    fn traverse_json_contextual(&mut self, u: &str, kind: ModuleKind) -> R {
+        self.with_source(u, |this, file| {
+            let Ast::Json(ast) = &file.ast else { return Err("Unexpected code path encountered".into()) };
+            let Ok(ast) = ast else { return Ok(()) };
+            let parsed = parse_json(file.source).unwrap_or(Value::Null);
+            let parent = this.contextual_parent(&parsed, kind);
+            // `json.sections ?? {}`
+            let sections = match parsed.get("sections") {
+                None | Some(Value::Null) => Vec::new(),
+                s => entries(s)?,
+            };
+            for (key, section) in sections {
+                let path = ["sections".to_string(), key];
+                let node = node_at_path(ast, &path_keys(&path));
+                let section_type = match find_type_property(node)? {
+                    Some(prop) => {
+                        let ty = section.get("type").unwrap_or(&UNDEFINED);
+                        let module = this.section_module(&str_of(ty));
+                        this.bind(u, &module, Some(range_of(prop, 0)), ReferenceType::Direct);
+                        this.traverse(&module)?;
+                        Some(ty)
+                    }
+                    None => parent.as_ref().and_then(|p| p.get("sections")?.get(&path[1])?.get("type")),
+                };
+                // Without the section's type, there's no telling whether these are theme blocks.
+                if let Some(Value::String(section_type)) = section_type {
+                    let section_type = section_type.clone();
+                    this.traverse_section_references(u, ast, &path, section, &section_type)?;
+                }
+            }
+            if kind == ModuleKind::JsonTemplate {
+                let own = parsed.get("layout");
+                let layout = own.or_else(|| parent.as_ref().and_then(|p| p.get("layout")));
+                this.bind_layout(u, ast, layout, own)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Links a template to its layout, always indirectly. `own` is the template's own `layout`,
+    /// which the reference's range points at.
+    fn bind_layout(&mut self, u: &str, ast: &JsonNode<'_>, layout: Option<&Value>, own: Option<&Value>) -> R {
+        let name = match layout {
+            Some(Value::Bool(false)) => return Ok(()),
+            None => "theme".to_string(),
+            Some(v) => str_of(v),
+        };
+        let module = self.layout_module(&name);
+        let range = own.and_then(|_| node_at_path(ast, &["layout"])).map(|n| range_of(n, 0));
+        self.bind(u, &module, range, ReferenceType::Indirect);
+        self.traverse(&module)
+    }
+
+    /// `getContextualParent`: the parsed file a `parent` names, from `templates` for a template
+    /// and `sections` for a section group. `None` without a `parent`, or when it can't be read
+    /// as JSON.
+    fn contextual_parent(&self, json: &Value, kind: ModuleKind) -> Option<Value> {
+        let Some(Value::String(parent)) = json.get("parent") else { return None };
+        let dir = if kind == ModuleKind::JsonTemplate { "templates" } else { "sections" };
+        let u = uri::join(self.root_uri, &[dir, parent.as_str()]);
+        let parse = |file: &SourceCode<'_>| match &file.ast {
+            Ast::Json(Ok(_)) => parse_json(file.source),
+            _ => None,
+        };
+        if let Some(&file) = self.sources.get(u.as_str()) {
+            return parse(file);
+        }
+        let text = self.deps.fs().read_file(&u).ok()?;
+        parse(&to_source_code(&u, &text))
     }
 
     fn traverse_section_references(&mut self, source: &str, ast: &JsonNode<'_>, path: &[String], section: &Value, section_type: &str) -> R {
@@ -520,13 +594,20 @@ impl<'a> Builder<'a, '_> {
             let mut path = parent.to_vec();
             path.extend(["blocks".to_string(), key]);
             let node = node_at_path(ast, &path_keys(&path));
-            if self.skip_no_type && matches!(find_type_property(node), Ok(None)) {
-                continue;
+            // A contextual override's block already in the parent has no `type`: it doesn't link,
+            // but the blocks it adds inside still do.
+            let prop = if self.contextual {
+                find_type_property(node)?
+            } else {
+                // Upstream creates a module named `undefined`, then throws on the missing `type`.
+                self.block_module(&str_of(block.get("type").unwrap_or(&UNDEFINED)));
+                Some(find_type_property(node)?.ok_or("Cannot read properties of undefined (reading 'loc')")?)
+            };
+            if let Some(prop) = prop {
+                let module = self.block_module(&str_of(block.get("type").unwrap_or(&UNDEFINED)));
+                self.bind(source, &module, Some(range_of(prop, 0)), ReferenceType::Direct);
+                self.traverse(&module)?;
             }
-            let module = self.block_module(&str_of(block.get("type").unwrap_or(&UNDEFINED)));
-            let prop = find_type_property(node)?.ok_or("Cannot read properties of undefined (reading 'loc')")?;
-            self.bind(source, &module, Some(range_of(prop, 0)), ReferenceType::Direct);
-            self.traverse(&module)?;
             if let Some(nested) = block.get("blocks").filter(|b| b.is_truthy()) {
                 self.traverse_blocks(source, ast, &path, nested)?;
             }
@@ -553,11 +634,15 @@ pub fn build_theme_graph<'a>(
     divergences: Divergences,
 ) -> Result<ThemeGraph, String> {
     let join = |d: &str| uri::join(root_uri, &[d]);
+    let contextual = divergences.contains(Divergence::GraphNoType);
     let (templates, layout, sections, blocks) = (join("templates"), join("layout"), join("sections"), join("blocks"));
     let entry_points = recursive_read_directory(deps.fs(), root_uri, &|u, _| {
         u.starts_with(&templates)
             || (u.starts_with(&layout) && u.ends_with(".liquid"))
             || (u.starts_with(&sections) && u.ends_with(".liquid"))
+            // Shopify renders a contextual section group in place of its parent in the contexts
+            // it names, while `{% sections %}` only names the parent.
+            || (contextual && u.starts_with(&sections) && is_contextual_json(u))
             || (mode == Mode::App && u.starts_with(&blocks) && u.ends_with(".liquid"))
     })?;
     let mut b = Builder {
@@ -568,7 +653,7 @@ pub fn build_theme_graph<'a>(
         cache: HashMap::new(),
         traversed: HashSet::new(),
         block_names: None,
-        skip_no_type: divergences.contains(Divergence::GraphNoType),
+        contextual,
     };
     let mut entries_out = Vec::new();
     for u in &entry_points {

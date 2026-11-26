@@ -39,7 +39,7 @@ macro_rules! divergences {
 }
 
 divergences! {
-    GraphNoType: "theme-graph", "A JSON template section or block without `type` is skipped instead of failing the whole graph.";
+    GraphNoType: "theme-graph", "Contextual templates and section groups are traversed as theme-graph 0.3.10 does, instead of failing the whole graph.";
     GraphFailure: "OrphanedSnippet, ValidScopedCSSClass", "Graph-based conclusions are not drawn when the graph failed to build.";
     UnclosedHtmlIdentifier: "UnclosedHTMLElement", "Condition names print `a['b']['c']`, not `a['b'],['c']`.";
     HtmlSyntaxQuotedLiteral: "LiquidHTMLSyntaxError", "A quoted literal may contain the other kind of quote.";
